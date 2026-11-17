@@ -1,0 +1,1428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Elevation — Furniture to Vector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen studio — compact control column left, drawing sheet right (canvas flexes to fill) */
+:root{
+  --bg:#f3f3f1; --panel:#ffffff; --line:#d9d9d4; --fg:#1b1c1a; --muted:#6c6e68;
+  --accent:#2f4f6f; --accent-fg:#ffffff; --paper:#ffffff; --ink:#111111; --err:#a33a2a; --ok:#3d6b45;
+  --ui:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#141514; --panel:#1c1d1c; --line:#30322f; --fg:#e8e8e4; --muted:#9a9c95;
+  --accent:#8fb2d4; --accent-fg:#0f1a24; --err:#e48a7a; --ok:#8cc597; color-scheme:dark;
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--ui);
+  height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+header{display:flex;align-items:center;gap:16px;
+  padding:9px max(16px,env(safe-area-inset-right)) 9px max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand b{font-weight:600;letter-spacing:.02em;font-size:15px}
+.modes{display:flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.modes button{border:0;background:none;padding:5px 14px;border-radius:6px;cursor:pointer;color:var(--muted);font-weight:500}
+.modes button[aria-selected=true]{background:var(--fg);color:var(--bg)}
+.modes button:disabled{cursor:not-allowed}
+header .sub{font:12px var(--mono);color:var(--muted);margin-right:auto}
+@media (max-width:640px){header .sub{display:none}}
+button,select,input,textarea{font:inherit;color:inherit}
+.ghost{background:none;border:1px solid var(--line);border-radius:6px;padding:5px 11px;cursor:pointer}
+.ghost:hover{border-color:var(--muted)}
+.ghost:disabled{opacity:.4;cursor:not-allowed}
+main{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;min-height:0;
+  padding:14px max(16px,env(safe-area-inset-right)) 14px max(16px,env(safe-area-inset-left))}
+aside{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;overflow:auto;padding:2px}
+.label{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.row .label{margin:0}
+.link{background:none;border:0;padding:0;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.link:disabled{opacity:.4;cursor:not-allowed}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* photo + drawing thumbnails, side by side */
+.thumbs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+#drop,.thumb{position:relative;aspect-ratio:4/3;width:100%;max-width:100%;border-radius:7px;overflow:hidden;display:grid;place-items:center;text-align:center}
+#drop{border:1.5px dashed var(--line);background:var(--panel);cursor:pointer}
+#drop.over{border-color:var(--accent)}
+#drop img,.thumb img{width:100%;height:100%;object-fit:contain;display:block}
+#drop p{margin:0;color:var(--muted);padding:8px;font-size:12px;line-height:1.35}
+#drop p strong{color:var(--fg);font-weight:500}
+.thumb{padding:0;border:1px solid var(--line);background:#fff;cursor:zoom-in}
+.thumb:disabled{cursor:default;background:var(--panel)}
+.ph{color:var(--muted);font-size:12px;padding:8px;line-height:1.35}
+.badge{position:absolute;left:6px;top:6px;font:500 10px var(--mono);background:#111;color:#fff;border-radius:4px;padding:1px 5px}
+.busy{position:absolute;inset:0;display:grid;place-items:center;background:rgba(255,255,255,.8);color:#111;font:11px var(--mono)}
+
+.seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:none;padding:7px 6px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--fg);color:var(--bg)}
+.opts{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.toggle{display:flex;align-items:center;gap:8px;cursor:pointer}
+#go{background:var(--accent);color:var(--accent-fg);border:0;border-radius:7px;padding:10px;font-weight:600;cursor:pointer;flex:none}
+#go:disabled{opacity:.45;cursor:not-allowed}
+
+/* pipeline stepper */
+.pipe{display:flex;flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;font:12px var(--mono)}
+.pipe li{display:grid;grid-template-columns:16px 1fr;gap:6px;align-items:start;color:var(--muted)}
+.pipe .dot{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--line);margin-top:4px}
+.pipe li[data-s=run]{color:var(--fg)} .pipe li[data-s=run] .dot{border-color:var(--accent);background:var(--accent);animation:pulse 1s ease-in-out infinite}
+.pipe li[data-s=done] .dot{border-color:var(--ok);background:var(--ok)}
+.pipe li[data-s=err]{color:var(--err)} .pipe li[data-s=err] .dot{border-color:var(--err);background:var(--err)}
+.pipe small{display:block;color:var(--muted);word-break:break-word;font-size:11px}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pipe .dot{animation:none!important}}
+button:focus-visible,input:focus-visible,select:focus-visible,#drop:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* versions + refine chat: fills the rest of the column */
+.drawpanel{display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:150px;padding-top:10px;border-top:1px solid var(--line)}
+.history{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;flex:1 1 0;min-height:44px;overflow:auto}
+.history button{display:grid;grid-template-columns:2.4em 1fr auto;gap:6px;align-items:baseline;width:100%;text-align:left;background:none;border:0;border-radius:5px;padding:4px 6px;cursor:pointer;color:var(--muted);font-size:13px}
+.history button:hover{background:var(--panel)}
+.history button[aria-current=true]{background:var(--panel);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line)}
+.history .v{font:500 11px var(--mono)}
+.history .note{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history .vec{font:10px var(--mono);color:var(--ok)}
+.history li.err{color:var(--err);font-size:12px;padding:4px 6px}
+.chat{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:end;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:5px;flex:none}
+.chat textarea{border:0;background:none;resize:none;padding:4px;min-width:0;font-size:13px}
+.chat textarea:focus{outline:none}
+.chat:focus-within{border-color:var(--accent)}
+.chat button{width:30px;height:30px;border-radius:6px;border:0;background:var(--accent);color:var(--accent-fg);font-size:15px;cursor:pointer}
+.chat button:disabled{opacity:.4;cursor:not-allowed}
+
+/* drawing sheet */
+section.sheet{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:4px}
+.tabs button{border:1px solid transparent;background:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:var(--muted)}
+.tabs button[aria-selected=true]{border-color:var(--line);color:var(--fg);background:var(--bg)}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+.filltoggle{font-size:13px;margin-right:auto;margin-left:6px;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.canvas{position:relative;flex:1 1 0;min-height:0;background:var(--paper)}
+.stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:18px}
+.stage img,.stage svg{width:100%;height:100%;object-fit:contain;display:block}
+/* keep the drawing clear of the floating size panel */
+.canvas.sp-open #vectorStage{padding-right:268px}
+.canvas.sp-collapsed #vectorStage{padding-top:52px}
+.trace{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:7px 12px;border-top:1px solid var(--line);font-size:13px}
+.trace label{display:flex;align-items:center;gap:6px}
+.trace input[type=range]{width:90px}
+.trace output{font:12px var(--mono);color:var(--muted);min-width:2.2em}
+.seg.mini{grid-template-columns:repeat(2,auto);font-size:13px}
+.seg.mini button{padding:4px 10px}
+.titleblock{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;border-top:1px solid #111;background:var(--paper);color:#111;font:11px var(--mono)}
+.titleblock div{padding:5px 12px;border-right:1px solid #111}
+.titleblock div:last-child{border-right:0}
+.titleblock small{display:block;font-size:9px;letter-spacing:.08em;color:#666;text-transform:uppercase}
+.empty{color:#888;font:12px var(--mono);text-align:center}
+
+/* floating overall-size panel (top right of the canvas) */
+.sizepanel{position:absolute;top:12px;right:12px;z-index:2;width:236px;max-width:calc(100% - 24px);
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 24px rgba(0,0,0,.12);
+  padding:10px 12px;display:flex;flex-direction:column;gap:8px;color:var(--fg)}
+.sizepanel .head{display:flex;align-items:center;gap:8px}
+.sizepanel .head .label{flex:1}
+.iconbtn{width:22px;height:22px;display:grid;place-items:center;border:1px solid var(--line);border-radius:5px;background:none;cursor:pointer;color:var(--muted);font:13px/1 var(--mono);padding:0}
+.sizepanel.collapsed{width:auto;padding:6px 8px 6px 12px}
+.sizepanel.collapsed .body{display:none}
+.chip{font:12px var(--mono);font-variant-numeric:tabular-nums;color:var(--fg);white-space:nowrap}
+.sizepanel:not(.collapsed) .chip{display:none}
+.sizepanel.collapsed .head .label{display:none}
+.body{display:flex;flex-direction:column;gap:8px}
+.dims{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.dims label{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:0 6px;font:500 11px var(--mono);color:var(--muted);min-width:0}
+.dims label:focus-within{border-color:var(--accent)}
+.dims input{width:100%;min-width:0;border:0;background:none;padding:6px 0;font:13px var(--mono);color:var(--fg);font-variant-numeric:tabular-nums}
+.dims input:focus{outline:none}
+.dims label.linked{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.dims label.linked{color:var(--accent)}
+.dims input::-webkit-outer-spin-button,.dims input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.dims input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.dims label.offview{opacity:.6}
+.lockglyph{color:var(--accent)}
+.fit{display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.fit span{margin-right:2px}
+.fit button{border:1px solid var(--line);background:var(--bg);border-radius:5px;padding:2px 7px;font-size:12px;cursor:pointer;color:var(--muted)}
+.fit button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.hint{margin:0;font-size:11.5px;color:var(--muted);line-height:1.35}
+.hint.err{color:var(--err)}
+.hint.strong{color:var(--fg);font-family:var(--mono)}
+
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--fg);padding:22px;width:min(440px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+dialog h2{margin:0 0 6px;font-size:16px}
+dialog p{margin:0 0 14px;color:var(--muted)}
+dialog input,dialog select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);margin-bottom:12px}
+dialog .actions{display:flex;justify-content:flex-end;gap:8px}
+
+/* narrow screens: stack and allow page scroll */
+@media (max-width:860px){
+  body{height:auto;overflow:auto;display:block}
+  main{grid-template-columns:1fr}
+  aside{overflow:visible}
+  .canvas{flex:none;height:70vh}
+  .titleblock{grid-template-columns:1fr 1fr}.titleblock div:nth-child(2){border-right:0}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>Elevation</b></div>
+  <nav class="modes" role="tablist" aria-label="Subject">
+    <button type="button" role="tab" data-mode="furniture" aria-selected="true">Furniture</button>
+    <button type="button" role="tab" data-mode="plants" aria-selected="false">Plants</button>
+  </nav>
+  <span class="sub">photo → line drawing → vector</span>
+  <button class="ghost" id="settingsBtn" type="button">Settings</button>
+</header>
+
+<main>
+  <aside>
+    <div class="thumbs">
+      <div class="tcol">
+        <p class="label">Photo</p>
+        <div id="drop" tabindex="0" role="button" aria-label="Choose a furniture photo">
+          <p><strong>Drop a photo</strong><br>click or paste</p>
+        </div>
+      </div>
+      <div class="tcol">
+        <div class="row"><p class="label">Drawing</p><button type="button" class="link" id="fromPhoto" disabled title="Start a new version from the photo">Redraw</button></div>
+        <button type="button" class="thumb" id="thumb" disabled aria-label="Show this drawing large">
+          <img id="thumbImg" alt="Current line drawing" hidden>
+          <span class="ph" id="thumbPh">Appears after Generate</span>
+          <span class="badge" id="thumbBadge" hidden>v1</span>
+          <span class="busy" id="thumbBusy" hidden>Drawing…</span>
+        </button>
+      </div>
+    </div>
+    <input id="file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+
+    <div>
+      <p class="label">View</p>
+      <div class="seg" id="viewSeg"></div>
+    </div>
+
+    <div class="opts" id="opts"></div>
+
+    <button id="go" type="button" disabled>Generate drawing</button>
+
+    <ol class="pipe" aria-live="polite">
+      <li id="p1"><span class="dot"></span><span>1 · Line drawing <small id="p1m">Nano Banana redraws the photo as an orthographic view</small></span></li>
+      <li id="p2"><span class="dot"></span><span>2 · Vectorize <small id="p2m">Traces the drawing into single-line SVG paths</small></span></li>
+    </ol>
+
+    <div id="drawPanel" class="drawpanel" hidden>
+      <p class="label" style="margin:0">Versions</p>
+      <ol class="history" id="history" aria-label="Drawing versions"></ol>
+      <form id="chatForm" class="chat" autocomplete="off">
+        <label for="chatIn" class="sr">Refine the drawing</label>
+        <textarea id="chatIn" rows="2" placeholder="Refine the drawing… e.g. taper the legs"></textarea>
+        <button type="submit" id="chatSend" aria-label="Send refinement">↑</button>
+      </form>
+    </div>
+  </aside>
+
+  <section class="sheet">
+    <div class="toolbar">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tabRaster" aria-selected="false">Line drawing</button>
+        <button type="button" role="tab" id="tabVector" aria-selected="true">Vector</button>
+      </div>
+      <label class="toggle filltoggle" title="Show or hide the closed outline / fill shape of the overall form"><input type="checkbox" id="silh" checked> Fill shape</label>
+      <div class="tools">
+        <button class="ghost" id="pngBtn" type="button" disabled>Download PNG</button>
+        <button class="ghost" id="copyBtn" type="button">Copy SVG</button>
+        <button class="ghost" id="dlBtn" type="button">Download SVG</button>
+      </div>
+    </div>
+    <div class="canvas">
+      <div class="stage" id="rasterStage" hidden><p class="empty">The line drawing from step 1 appears here.</p></div>
+      <div class="stage" id="vectorStage"></div>
+      <div class="sizepanel" id="sizePanel" hidden>
+        <div class="head">
+          <p class="label" style="margin:0" id="sizeLabel">Overall size · in</p>
+          <span class="chip" id="sizeChip"></span>
+          <button type="button" class="iconbtn" id="sizeToggle" aria-expanded="true" aria-label="Collapse size panel">–</button>
+        </div>
+        <div class="body">
+          <div class="dims">
+            <label for="szW">W<input id="szW" type="number" step="0.5" min="0" inputmode="decimal"></label>
+            <label for="szD">D<input id="szD" type="number" step="0.5" min="0" inputmode="decimal"></label>
+            <label for="szH">H<input id="szH" type="number" step="0.5" min="0" inputmode="decimal"></label>
+          </div>
+          <p class="hint strong" id="sizeFit"></p>
+          <p class="hint" id="sizeNote"></p>
+        </div>
+      </div>
+    </div>
+    <div class="trace" id="traceCtl">
+      <div class="seg mini" id="modeSeg" role="group" aria-label="Trace mode">
+        <button type="button" data-m="center" aria-pressed="true">Centerline</button>
+        <button type="button" data-m="outline" aria-pressed="false">Outline</button>
+      </div>
+      <label>Threshold <input type="range" id="thr" min="60" max="230" value="160"><output id="thrO">160</output></label>
+      <label>Speckle filter <input type="range" id="turd" min="0" max="60" value="8"><output id="turdO">8</output></label>
+      <label data-mode="center">Simplify <input type="range" id="simp" min="0" max="40" value="15"><output id="simpO">1.5</output></label>
+      <label data-mode="center" class="toggle"><input type="checkbox" id="curves" checked> Curves</label>
+      <label data-mode="center" class="toggle"><input type="checkbox" id="weights" checked> Line weights</label>
+      <label class="toggle" title="Dashed rectangle at the overall extents; the dimensions measure this box"><input type="checkbox" id="bbox" checked> Bounding box</label>
+      <label data-mode="outline" hidden>Smoothing <input type="range" id="alpha" min="0" max="13" value="10"><output id="alphaO">1.0</output></label>
+    </div>
+    <div class="titleblock">
+      <div><small>Object</small><span id="tbName">Lounge chair (example)</span></div>
+      <div><small>View</small><span id="tbView">Side</span></div>
+      <div><small>Scale</small><span id="tbScale">NTS</span></div>
+      <div><small>Date</small><span id="tbDate"></span></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <p>The key is stored only in this browser.</p>
+    <label class="label" for="keyInput">Gemini API key</label>
+    <input id="keyInput" type="password" autocomplete="off">
+    <label class="label" for="modelSel">Image model (step 1)</label>
+    <select id="modelSel"><option value="">Loading…</option></select>
+    <div class="actions"><button class="ghost" value="cancel">Close</button><button class="ghost" id="saveKey" value="default">Save</button></div>
+  </form>
+</dialog>
+
+<script type="module">
+const $ = s => document.querySelector(s);
+const store = {
+  get:k=>{try{return localStorage.getItem(k)}catch{return null}},
+  set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}
+};
+const API = "https://generativelanguage.googleapis.com/v1beta";
+const DEFAULT_KEY = "";   // enter your Gemini API key under Settings (stored only in your browser)
+const DEFAULT_MODEL = "models/gemini-nano-banana-2.1";
+const MODEL_PREF = ["nano-banana-2.1","gemini-3-pro-image","gemini-3.1-flash-image","flash-lite-image","gemini-2.5-flash-image"];
+const getKey = () => store.get("gemini_key") || DEFAULT_KEY;
+const getModel = () => store.get("image_model") || DEFAULT_MODEL;
+
+/* ---------- Modes: Furniture and Plants share one pipeline, with their own prompts and defaults ---------- */
+const AXES={side:["d","h"],front:["w","h"],top:["w","d"]};
+const MODES={
+  furniture:{
+    views:[{key:"side",label:"Side",short:"side"},{key:"front",label:"Front",short:"front"},{key:"top",label:"Top",short:"plan"}],
+    axes:AXES,
+    opts:[{key:"detail",label:"Interior detail (seams, joints)",def:true},{key:"hidden",label:"Hidden lines (dashed)",def:false}],
+    viewText:{
+      side:"a SIDE ELEVATION — the piece seen exactly from its left or right side, camera perpendicular to the depth axis, at mid-height",
+      front:"a FRONT ELEVATION — the piece seen exactly straight-on from the front, camera perpendicular to the width axis, at mid-height",
+      top:"a PLAN VIEW — the piece seen from directly above, camera pointing straight down"},
+    prompt:(view,o)=>`Redraw the main piece of furniture in this photo as a precise technical line drawing: ${MODES.furniture.viewText[view]}.
+Requirements:
+- True orthographic projection: no perspective, no vanishing points, no foreshortening. Parallel edges stay parallel.
+- Infer the real 3D form and correct proportions of the piece from the photo; keep symmetrical parts symmetrical.
+- Pure black lines on a pure white background only. No grey, no shading, no hatching, no shadows, no gradients, no texture, no colour.
+- Crisp, continuous, closed outlines. Heavier line for the outer silhouette, thinner lines for interior edges.
+${o.detail?"- Include interior construction edges: seams, joints, cushion breaks, rails, panel edges.":"- Silhouette and major parts only; omit small interior detail."}
+${o.hidden?"- Show important hidden edges (legs or frame concealed behind other parts) as evenly dashed lines.":"- Do not draw hidden edges."}
+- ${view==="top"?"No ground line.":"One thin horizontal ground line under the feet."}
+- Only the furniture: no room, no floor, no people, no text, no labels, no dimensions, no border, no title.
+- Centre the piece with a generous white margin on all sides.`,
+    subject:["a piece of furniture","that furniture"],
+    sizePrompt:`Estimate the real-world overall dimensions of the main piece of furniture in this photo, in inches.
+- width: side to side, as seen from the front of the piece
+- depth: front to back
+- height: floor to the highest point
+Use what is visible in the photo (proportions, materials, any people or objects for scale) together with typical sizes for this kind of furniture, e.g. dining seat height about 18", desk or dining table height 29-30", lounge chair seat height 15-17", sofa depth 34-40". Round to the nearest half inch.
+Reply with only JSON: {"name": "<2-5 word name of the piece>", "width": number, "depth": number, "height": number, "confidence": "low" | "medium" | "high"}`,
+    estFactor:1, unit:1, unitLabel:"in", close:0.006, textMax:2.5,
+    chat:"Refine the drawing… e.g. taper the legs", exampleName:"Lounge chair (example)",
+    example:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="#111" stroke-linecap="round" stroke-linejoin="round">
+<g stroke-width="3"><path d="M90 250 L110 150 L300 150 L310 250"/><path d="M110 150 L80 60 Q76 48 88 46 L104 46 L132 150"/>
+<path d="M105 175 L300 175"/><path d="M300 150 Q318 146 322 132 L322 120"/><path d="M118 120 L322 120"/></g>
+<g stroke-width="1.4"><path d="M112 160 L298 160"/><path d="M96 70 L120 140"/></g><path d="M40 250 L360 250" stroke-width="1"/></svg>`},
+  plants:{
+    views:[{key:"side",label:"Elevation",short:"elevation"},{key:"top",label:"Plan",short:"plan"}],
+    axes:{side:["w","h"],top:["w","d"]},
+    opts:[{key:"foliage",label:"Foliage texture",def:true},{key:"branches",label:"Branch structure",def:true}],
+    viewText:{
+      side:"an ELEVATION — the plant seen straight from the side at mid-height, as in an architectural elevation, with no perspective",
+      top:"a PLAN VIEW — the plant seen from directly above, as in an architectural site plan"},
+    prompt:(view,o)=>`Redraw the main plant in this photo (tree, shrub, grass, perennial or groundcover) as a clean architectural line drawing: ${MODES.plants.viewText[view]}.
+Requirements:
+- Orthographic: no perspective, no foreshortening, no horizon, no vanishing points.
+- Faithful to this specific plant: its habit and overall silhouette, canopy shape, density and openness, and its trunk or stems and branching pattern as they actually appear. Do not substitute a generic tree symbol.
+- Pure black lines on a pure white background only. No grey, no shading, no hatching, no shadows, no gradients, no colour.
+- Crisp, continuous lines. Heavier line for the outer edge of the canopy or plant mass, thinner lines inside.
+${view==="top"
+  ?(o.foliage?"- Draw the canopy as seen from above: a heavy outer canopy edge with a lightly scalloped edge that follows this plant's leaf mass, plus a few sparse inner leaf-cluster outlines.":"- Draw the canopy as seen from above: a single heavy outer canopy edge following this plant's leaf mass, no texture inside.")
+  :(o.foliage?"- Suggest foliage with simple, open, lightly scalloped leaf-cluster outlines inside the canopy, in the style of architectural entourage. Keep it sparse so individual lines stay distinct.":"- Canopy or plant mass as a single clean outline, with no foliage texture inside.")}
+${view==="top"
+  ?(o.branches?"- Mark the trunk with a small circle at its true position and show the main branches radiating from it. For multi-stem plants, mark each stem.":"- Mark the trunk with a small circle at its true position (each stem for multi-stem plants); no branches.")
+  :(o.branches?"- Show the trunk or stems and the main branch structure, continuing visibly up into the canopy.":"- Show the trunk or stems only below the canopy; no branches inside the canopy.")}
+- For grasses and perennials, draw the clump outline and a few representative blades or stems rather than every leaf.
+- ${view==="top"?"No ground line.":"One thin horizontal ground line at the base."}
+- Only the plant (and its planter or pot if it is in one): no ground cover, lawn, other plants, people, buildings, sky, text, labels, dimensions, border or title.
+- Centre the plant with a generous white margin on all sides.`,
+    subject:["a plant","that plant"],
+    sizePrompt:`Identify the main plant in this photo and estimate its size as pictured (not at maturity), in feet.
+- width: spread side to side as seen in the photo
+- depth: spread front to back (assume similar to width unless the habit clearly differs, e.g. a hedge, espalier or columnar form)
+- height: ground to the top of the plant
+Use cues in the photo (people, doors, windows, fences, cars, buildings, pots) and typical sizes for this species at its apparent age. Round to the nearest half foot.
+Reply with only JSON: {"name": "<common name, with the botanical name in parentheses if confident>", "width": number, "depth": number, "height": number, "confidence": "low" | "medium" | "high"}`,
+    estFactor:12, unit:12, unitLabel:"ft", close:0.02, textMax:24, maskFill:true,
+    maskPrompt:`This image is a black-and-white line drawing of a plant. Turn it into a solid silhouette mask of the plant.
+- Fill every part of the plant solid pure black: leaves, stems, petioles, trunk, branches, flowers, and its pot or planter if there is one.
+- Everything that is not plant is pure white: the background, including the background visible in the gaps between leaves, stems and branches, and any holes, splits or slits in the leaves.
+- No outlines, no interior lines, no grey, no texture, no ground line.
+- Keep exactly the same framing, position, size and shapes as the input image, so the mask overlays the drawing exactly.`,
+    chat:"Refine the drawing… e.g. make the canopy more open", exampleName:"Multi-stem tree (example)",
+    example:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="#111" stroke-linecap="round" stroke-linejoin="round">
+<g stroke-width="3"><path d="M122 168 Q98 150 114 126 Q102 98 134 88 Q140 60 176 64 Q196 42 224 60 Q258 52 268 84 Q298 94 288 124 Q304 150 280 170 Q262 186 236 176 Q216 192 196 178 Q170 192 150 178 Q126 186 122 168 Z"/>
+<path d="M192 262 L194 196 M206 262 L203 200"/></g>
+<g stroke-width="1.4"><path d="M194 196 Q176 168 150 150 M194 200 Q200 160 196 118 M203 200 Q226 170 252 150 M196 150 Q216 130 230 112"/>
+<path d="M150 120 Q160 108 172 116 M220 92 Q232 82 244 92 M168 150 Q178 140 190 148 M240 140 Q252 132 262 142"/></g>
+<path d="M60 262 L340 262" stroke-width="1"/></svg>`}
+};
+const freshState=m=>({mode:m,file:null,photoUrl:"",view:MODES[m].views[0].key,name:m,raster:null,rasterUrl:"",svg:"",
+  versions:[],cur:-1,vectorOf:-1,known:{},lastKey:null,est:null,size:null,sizeP:null,raw:null,note:"",
+  opts:Object.fromEntries(MODES[m].opts.map(o=>[o.key,o.def]))});
+const sessions={};
+let state=freshState(MODES[store.get("mode")]?store.get("mode"):"furniture");
+const M=()=>MODES[state.mode];
+const axesFor=v=>M().axes[v]||M().axes[M().views[0].key];
+const viewInfo=v=>M().views.find(x=>x.key===v)||M().views[0];
+$("#tbDate").textContent = new Date().toISOString().slice(0,10);
+
+/* ---------- Potrace (WASM) ---------- */
+let potraceMod = null;
+async function getPotrace(){
+  if(!potraceMod){
+    potraceMod = await import("https://cdn.jsdelivr.net/npm/esm-potrace-wasm@0.5.1/dist/index.js");
+    await potraceMod.init();
+  }
+  return potraceMod.potrace;
+}
+
+
+/* ---------- Photo input ---------- */
+const drop=$("#drop"), fileIn=$("#file");
+drop.onclick=()=>fileIn.click();
+drop.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();fileIn.click()} };
+fileIn.onchange=()=>{ const f=fileIn.files[0]; fileIn.value=""; if(f) setFile(f); };   // reset so the same file can be picked again
+["dragover","dragenter"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,()=>drop.classList.remove("over")));
+drop.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0];f&&setFile(f)});
+window.addEventListener("paste",e=>{const f=[...(e.clipboardData?.files||[])].find(f=>f.type.startsWith("image/"));f&&setFile(f)});
+
+function setFile(f){
+  if(!/^image\/(jpeg|png|webp)$/.test(f.type)) return step(1,"err","Use a JPG, PNG or WebP photo.");
+  if(busy) return;
+  state.file=f; state.name=f.name.replace(/\.[^.]+$/,"").replace(/[^\w-]+/g,"-")||state.mode;
+  if(state.photoUrl) URL.revokeObjectURL(state.photoUrl);
+  state.photoUrl=URL.createObjectURL(f); showPhoto();
+  $("#go").disabled=false; step(1,"",""); step(2,"","");
+  state.versions.forEach(v=>URL.revokeObjectURL(v.url));
+  state.versions=[]; state.cur=-1; state.vectorOf=-1; state.raster=null;
+  state.size=null; state.sizeP=null; state.raw=null; state.known={}; state.lastKey=null; state.est=null; fillSizeInputs(); sizeNote(""); $("#sizeFit").textContent="";
+  $("#drawPanel").hidden=true; $("#history").innerHTML=""; updateGoLabel();
+  $("#thumbImg").hidden=true; $("#thumbBadge").hidden=true; $("#thumbPh").hidden=false; $("#thumb").disabled=true;
+  $("#fromPhoto").disabled=false; updateSizePanel();
+}
+
+function showPhoto(){
+  drop.innerHTML="";
+  if(state.photoUrl){ const img=new Image(); img.alt="Source photo"; img.src=state.photoUrl; drop.append(img); }
+  else drop.innerHTML="<p><strong>Drop a photo</strong><br>click or paste</p>";
+}
+function renderViewSeg(){
+  const seg=$("#viewSeg"), vs=M().views;
+  seg.style.gridTemplateColumns=`repeat(${vs.length},1fr)`;
+  seg.innerHTML=vs.map(v=>`<button type="button" data-v="${v.key}" aria-pressed="${v.key===state.view}">${v.label}</button>`).join("");
+}
+$("#viewSeg").onclick=e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  state.view=b.dataset.v;
+  $("#viewSeg").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));
+  updateGoLabel();
+};
+function renderOpts(){
+  const box=$("#opts"); box.innerHTML="";
+  M().opts.forEach(o=>{
+    const l=document.createElement("label"); l.className="toggle";
+    l.innerHTML=`<input type="checkbox" id="opt-${o.key}">`; l.append(" "+o.label);
+    const cb=l.querySelector("input"); cb.checked=!!state.opts[o.key];
+    cb.onchange=()=>{ state.opts[o.key]=cb.checked; };
+    box.append(l);
+  });
+}
+
+/* ---------- Tabs ---------- */
+function showTab(which){
+  const r=which==="raster";
+  $("#tabRaster").setAttribute("aria-selected",r); $("#tabVector").setAttribute("aria-selected",!r);
+  $("#rasterStage").hidden=!r; $("#vectorStage").hidden=r; $("#traceCtl").hidden=r;
+  updateSizePanel();
+}
+$("#tabRaster").onclick=()=>showTab("raster");
+$("#tabVector").onclick=()=>showTab("vector");
+
+/* ---------- Settings ---------- */
+const dlg=$("#settings");
+$("#settingsBtn").onclick=()=>{ $("#keyInput").value=getKey(); loadModels(); dlg.showModal(); };
+$("#saveKey").onclick=()=>{ const k=$("#keyInput").value.trim(); if(k) store.set("gemini_key",k); if($("#modelSel").value) store.set("image_model",$("#modelSel").value); };
+
+async function loadModels(){
+  const sel=$("#modelSel"), key=($("#keyInput").value||getKey()).trim();
+  try{
+    const r=await fetch(`${API}/models?pageSize=300`,{headers:{"x-goog-api-key":key}});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(`${r.status} ${j.error?.message||""}`);
+    const ms=(j.models||[]).filter(m=>/image/.test(m.name)&&!/imagen/.test(m.name)&&m.supportedGenerationMethods?.includes("generateContent"));
+    const rank=n=>{const i=MODEL_PREF.findIndex(p=>n.includes(p));return i<0?99:i};
+    ms.sort((a,b)=>rank(a.name)-rank(b.name));
+    if(!ms.length) throw new Error("no image models on this key");
+    sel.innerHTML=ms.map(m=>`<option value="${m.name}">${m.displayName||m.name.replace("models/","")}</option>`).join("");
+    const cur=getModel(); sel.value=ms.some(m=>m.name===cur)?cur:ms[0].name;
+  }catch(err){
+    sel.innerHTML=`<option value="${getModel()}">${getModel().replace("models/","")} (list unavailable: ${String(err.message).slice(0,50)})</option>`;
+  }
+}
+
+/* ---------- Pipeline status ---------- */
+function step(n,s,msg){ const li=$("#p"+n); li.dataset.s=s; if(msg!==undefined) $("#p"+n+"m").textContent=msg||(n===1?"Nano Banana redraws the photo as an orthographic view":"Traces the drawing into single-line SVG paths"); }
+
+/* ---------- Stage 1: Nano Banana line drawing ---------- */
+function buildPrompt(){ return M().prompt(state.view,state.opts); }
+
+const fileToB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(b)});
+async function downscale(f){
+  const img=await createImageBitmap(f); const s=Math.min(1,1600/Math.max(img.width,img.height));
+  if(s===1&&f.type==="image/jpeg") return f;
+  const c=document.createElement("canvas"); c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+  const g=c.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height);
+  return await new Promise(r=>c.toBlob(r,"image/jpeg",.92));
+}
+
+/* one Nano Banana call: parts in, image blob out (retries without imageConfig if a model rejects it) */
+async function nano(parts){
+  const send=async withConfig=>{
+    const body={contents:[{parts}],generationConfig:{responseModalities:["IMAGE"]}};
+    if(withConfig) body.generationConfig.imageConfig={aspectRatio:"4:3",imageSize:"2K"};
+    const r=await fetch(`${API}/${getModel()}:generateContent`,{method:"POST",
+      headers:{"Content-Type":"application/json","x-goog-api-key":getKey()},body:JSON.stringify(body)});
+    return {r,j:await r.json().catch(()=>({}))};
+  };
+  let {r,j}=await send(true);
+  if(r.status===400 && /imageConfig|imageSize|aspect/i.test(j.error?.message||"")) ({r,j}=await send(false));
+  if(!r.ok){
+    if(r.status===404) store.set("image_model","");
+    throw new Error(`${r.status} ${j.error?.message||j.error?.status||""}`.trim()+(r.status===404?" — open Settings and pick a model from the list.":""));
+  }
+  const out=j.candidates?.[0]?.content?.parts||[];
+  const img=out.map(p=>p.inlineData||p.inline_data).filter(Boolean).pop();
+  if(!img?.data){
+    const why=out.map(p=>p.text).filter(Boolean).join(" ")||j.candidates?.[0]?.finishReason||j.promptFeedback?.blockReason||"no image returned";
+    throw new Error(`Model returned no image: ${why}`.slice(0,240));
+  }
+  const bin=Uint8Array.from(atob(img.data),c=>c.charCodeAt(0));
+  return new Blob([bin],{type:img.mimeType||img.mime_type||"image/png"});
+}
+const imgPart=async b=>({inline_data:{mime_type:b.type||"image/png",data:await fileToB64(b)}});
+
+/* ---------- Versions ---------- */
+state.versions=[]; state.cur=-1; state.vectorOf=-1;
+const curVer=()=>state.versions[state.cur];
+
+async function addVersion(blob,note,view){
+  const v={n:state.versions.length+1,blob,url:URL.createObjectURL(blob),bmp:await createImageBitmap(blob),note,view};
+  state.versions.push(v);
+  selectVersion(state.versions.length-1);
+}
+function selectVersion(i){
+  state.cur=i; const v=curVer();
+  state.raster=v.bmp; state.rasterUrl=v.url;
+  $("#drawPanel").hidden=false;
+  $("#thumbImg").src=v.url; $("#thumbBadge").textContent="v"+v.n;
+  $("#thumbImg").hidden=false; $("#thumbBadge").hidden=false; $("#thumbPh").hidden=true; $("#thumb").disabled=false;
+  $("#rasterStage").innerHTML=""; const im=new Image(); im.alt="Line drawing v"+v.n; im.src=v.url; $("#rasterStage").append(im);
+  $("#pngBtn").disabled=false;
+  renderHistory(); updateGoLabel();
+  if(state.vectorOf>=0 && state.vectorOf!==i) step(2,"",`Vector is from v${state.versions[state.vectorOf].n} — press Generate drawing to trace v${v.n}`);
+}
+function renderHistory(){
+  const ol=$("#history"); ol.innerHTML="";
+  state.versions.forEach((v,i)=>{
+    const li=document.createElement("li"), b=document.createElement("button");
+    b.type="button"; b.setAttribute("aria-current",i===state.cur);
+    b.innerHTML=`<span class="v">v${v.n}</span><span class="note"></span><span class="vec">${i===state.vectorOf?"vector":""}</span>`;
+    b.querySelector(".note").textContent=v.note; b.title=v.note;
+    b.onclick=()=>selectVersion(i);
+    li.append(b); ol.append(li);
+  });
+  ol.scrollTop=ol.scrollHeight;
+}
+function logError(msg){ const li=document.createElement("li"); li.className="err"; li.textContent=msg; $("#history").append(li); }
+function updateGoLabel(){
+  const v=curVer();
+  $("#go").textContent=!v?"Generate drawing":v.view!==state.view?`Generate ${viewInfo(state.view).short} drawing from photo`:`Generate drawing from v${v.n}`;
+}
+let busy=false;
+function setBusy(on,msg){
+  busy=on; document.querySelectorAll(".modes button").forEach(b=>b.disabled=on&&b.getAttribute("aria-selected")!=="true");
+  $("#thumbBusy").hidden=!on; if(msg) $("#thumbBusy").textContent=msg;
+  $("#chatSend").disabled=on; $("#go").disabled=on||!state.file; $("#fromPhoto").disabled=on||!state.file;
+}
+
+/* ---------- Stage 1a: photo -> drawing ---------- */
+async function drawFromPhoto(){
+  step(1,"run",`Drawing ${viewInfo(state.view).short} view with ${getModel().replace("models/","")}…`);
+  setBusy(true,"Drawing from photo…");
+  try{
+    if(!state.size && !state.sizeP) startEstimate();
+    const blob=await nano([{text:buildPrompt()},await imgPart(await downscale(state.file))]);
+    await addVersion(blob,`From photo · ${viewInfo(state.view).short}`,state.view);
+    step(1,"done",`v${curVer().n} ready · ${curVer().bmp.width}×${curVer().bmp.height}px`);
+  }finally{ setBusy(false); }
+}
+
+/* ---------- Stage 1b: refine current drawing via chat ---------- */
+function editPrompt(instr,view){
+  const [subj,ref]=M().subject;
+  return `The first image is a technical orthographic line drawing of ${subj}. The second image is the original photo of ${ref}, for reference only.
+Edit the drawing as follows: ${instr}
+Keep everything not mentioned exactly as it is. The result must still be ${M().viewText[view]}, in true orthographic projection, with pure black lines on a pure white background: no grey, no shading, no colour, no text, labels, dimensions or border. Keep the same framing and scale unless the edit requires otherwise.`;
+}
+$("#chatForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const instr=$("#chatIn").value.trim(), base=curVer();
+  if(!instr||!base) return;
+  step(1,"run",`Editing v${base.n}…`); setBusy(true,`Editing v${base.n}…`);
+  try{
+    const blob=await nano([{text:editPrompt(instr,base.view)},await imgPart(base.blob),await imgPart(await downscale(state.file))]);
+    $("#chatIn").value="";
+    await addVersion(blob,instr,base.view);
+    step(1,"done",`v${curVer().n} ready · edited from v${base.n}`);
+  }catch(err){ step(1,"err",String(err.message||err)); logError(String(err.message||err).slice(0,160)); }
+  finally{ setBusy(false); $("#chatIn").focus(); }
+});
+$("#chatIn").addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); $("#chatForm").requestSubmit(); } });
+$("#thumb").onclick=()=>showTab("raster");
+$("#fromPhoto").onclick=async()=>{ try{ await drawFromPhoto(); showTab("raster"); }catch(err){ step(1,"err",String(err.message||err)); } };
+
+/* ---------- Stage 2: threshold + Potrace ---------- */
+function binarize(bmp,thr){
+  const c=document.createElement("canvas"); c.width=bmp.width; c.height=bmp.height;
+  const g=c.getContext("2d",{willReadFrequently:true}); g.fillStyle="#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(bmp,0,0);
+  const id=g.getImageData(0,0,c.width,c.height), d=id.data;
+  for(let i=0;i<d.length;i+=4){ const l=.299*d[i]+.587*d[i+1]+.114*d[i+2]; const v=l<thr?0:255; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
+  return id;
+}
+
+let traceMode="center";
+$("#modeSeg").onclick=e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  traceMode=b.dataset.m;
+  $("#modeSeg").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));
+  document.querySelectorAll("#traceCtl [data-mode]").forEach(el=>el.hidden=el.dataset.mode!==traceMode);
+  stage2().catch(e=>step(2,"err",e.message));
+};
+
+async function stage2(){
+  if(!state.raster) return;
+  step(2,"run","Tracing…");
+  if(traceMode==="center") return stage2Center();
+  const potrace=await getPotrace();
+  const thr=+$("#thr").value, turd=+$("#turd").value, alpha=+$("#alpha").value/10;
+  const raw=await potrace(binarize(state.raster,thr),{turdsize:turd,turnpolicy:4,alphamax:alpha,opticurve:1,opttolerance:.2,
+    pathonly:false,extractcolors:false,posterizelevel:2,posterizationalgorithm:0});
+  const svg=cleanSvg(raw,state.raster.width,state.raster.height);
+  if(!svg) throw new Error("Tracing produced no paths — try a higher threshold.");
+  await finishTrace(svg);
+  const n=(svg.match(/<path/g)||[]).length;
+  step(2,"done",`Outline · ${n} path${n===1?"":"s"}`);
+}
+
+async function stage2Center(){
+  await new Promise(r=>setTimeout(r,20));               // let the "Tracing…" status paint
+  const c=document.createElement("canvas"); c.width=state.raster.width; c.height=state.raster.height;
+  const g=c.getContext("2d",{willReadFrequently:true}); g.fillStyle="#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(state.raster,0,0);
+  const r=centerlineTrace(g.getImageData(0,0,c.width,c.height),{
+    thr:+$("#thr").value, speckle:+$("#turd").value, simplify:+$("#simp").value/10,
+    smooth:$("#curves").checked, weights:$("#weights").checked});
+  if(!r.count) throw new Error("No lines found — try a higher threshold.");
+  await finishTrace(r.svg);
+  step(2,"done",`Centerline · ${r.count} line${r.count===1?"":"s"}`);
+}
+
+function cleanSvg(text,w,h){
+  const doc=new DOMParser().parseFromString(text.trim().replace(/^<\?xml[^>]*>\s*/,""),"image/svg+xml");
+  const svg=doc.documentElement; if(svg.nodeName!=="svg"||doc.querySelector("parsererror")) return "";
+  svg.querySelectorAll("script,foreignObject,image,style,metadata").forEach(n=>n.remove());
+  const paths=[...svg.querySelectorAll("path")];
+  // drop a full-canvas white background path if Potrace emitted one
+  paths.forEach(p=>{ const f=(p.getAttribute("fill")||"").toLowerCase(); if(/^#?(fff|ffffff)$/.test(f.replace("#",""))||f==="white") p.remove(); });
+  if(!svg.querySelector("path")) return "";
+  svg.querySelectorAll("*").forEach(n=>{ n.removeAttribute("fill"); n.removeAttribute("stroke"); [...n.attributes].forEach(a=>/^on/i.test(a.name)&&n.removeAttribute(a.name)); });
+  if(!svg.getAttribute("viewBox")) svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+  svg.removeAttribute("width"); svg.removeAttribute("height");
+  svg.setAttribute("xmlns","http://www.w3.org/2000/svg");
+  svg.setAttribute("fill","#111111"); svg.setAttribute("fill-rule","evenodd");
+  return new XMLSerializer().serializeToString(svg);
+}
+
+/* re-trace live when sliders move (no new Gemini call) */
+let traceTimer;
+const retrace=()=>{ clearTimeout(traceTimer); traceTimer=setTimeout(()=>stage2().catch(e=>step(2,"err",e.message)),300); };
+[["thr","thrO",v=>v],["turd","turdO",v=>v],["simp","simpO",v=>(v/10).toFixed(1)],["alpha","alphaO",v=>(v/10).toFixed(1)]].forEach(([id,o,f])=>{
+  $("#"+id).addEventListener("input",()=>{ $("#"+o).textContent=f(+$("#"+id).value); retrace(); });
+});
+["curves","weights"].forEach(id=>$("#"+id).addEventListener("change",retrace));
+$("#silh").addEventListener("change",async()=>{                  // instant: no re-trace
+  store.set("fill_shape",$("#silh").checked?"1":"0");
+  if($("#silh").checked) await ensureFill().catch(e=>step(2,"err",String(e.message||e)));
+  compose();
+});
+$("#silh").checked=store.get("fill_shape")!=="0";
+
+/* ---------- Centerline tracer ---------- */
+/* Centerline tracer: bitmap line drawing -> single-stroke SVG paths.
+   Pipeline: threshold -> despeckle -> distance transform (line thickness)
+   -> Zhang-Suen thinning -> skeleton graph tracing -> spur pruning
+   -> junction merging -> Douglas-Peucker simplify -> corner-aware Bezier smoothing. */
+function centerlineTrace(src, opt){
+  const {thr=160, speckle=8, simplify=1.5, smooth=true, weights=true} = opt||{};
+  const {w,h,ink} = toInk(src,thr);
+  removeSmall(ink,w,h,Math.max(1,speckle*speckle/2));
+  const dist = distanceMap(ink,w,h);
+  thin(ink,w,h);
+
+  /* ---- skeleton graph ---- */
+  const OFF=[-w,-w+1,1,w+1,w,w-1,-1,-w-1];             // N NE E SE S SW W NW
+  const ORDER=[0,2,4,6,1,3,5,7];                         // prefer orthogonal steps
+  const deg=new Uint8Array(w*h);
+  for(let p=0;p<w*h;p++) if(ink[p]){let c=0;for(const o of OFF) c+=ink[p+o];deg[p]=c}
+  const isNode=p=>ink[p]&&deg[p]!==2;
+
+  // cluster adjacent node pixels (junction blobs) with union-find
+  const parent=new Int32Array(w*h).fill(-1);
+  const find=x=>{while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x]}return x};
+  for(let p=0;p<w*h;p++) if(isNode(p)) parent[p]=p;
+  for(let p=0;p<w*h;p++) if(parent[p]>=0) for(const o of OFF){const q=p+o;if(parent[q]>=0){const a=find(p),b=find(q);if(a!==b)parent[a]=b}}
+
+  const visited=new Uint8Array(w*h), segs=[];
+  function walk(start,next){
+    const pts=[start]; let prev=start, cur=next;
+    for(;;){
+      pts.push(cur);
+      if(isNode(cur)) break;
+      visited[cur]=1;
+      let nxt=-1;
+      for(const k of ORDER){const n=cur+OFF[k];
+        if(!ink[n]||n===prev) continue;
+        if(isNode(n)){ if(n!==start||pts.length>3){nxt=n;break} }
+        else if(!visited[n]){nxt=n;break}
+        else if(n===start&&pts.length>3){nxt=n;break}
+      }
+      if(nxt<0) break;
+      if(nxt===start&&!isNode(start)){pts.push(start);break}
+      prev=cur; cur=nxt;
+    }
+    return pts;
+  }
+  for(let p=0;p<w*h;p++){
+    if(!isNode(p)) continue;
+    for(const k of ORDER){const n=p+OFF[k];
+      if(ink[n]&&!isNode(n)&&!visited[n]) segs.push(walk(p,n));
+    }
+  }
+  for(let p=0;p<w*h;p++){                                // closed loops with no nodes
+    if(!ink[p]||isNode(p)||visited[p]) continue;
+    visited[p]=1;
+    let n=-1; for(const k of ORDER){const q=p+OFF[k]; if(ink[q]&&!visited[q]){n=q;break}}
+    if(n>=0){const s=walk(p,n); s.closed=true; segs.push(s)}
+  }
+
+  /* ---- per-segment thickness, end info ---- */
+  for(const s of segs){
+    const ds=s.map(p=>dist[p]).sort((a,b)=>a-b);
+    s.thick=Math.max(1,2*ds[ds.length>>1]);
+    s.len=s.length;
+    const a=s[0], b=s[s.length-1];
+    s.ca = isNode(a)&&deg[a]>1 ? find(a) : -1;            // -1 = free end
+    s.cb = !s.closed && isNode(b)&&deg[b]>1 ? find(b) : -1;
+  }
+
+  /* ---- prune spurs: short branches with a free end ---- */
+  let live=segs.filter(s=>{
+    if(s.closed) return s.len>=6;
+    const free=(s.ca<0)+(s.cb<0);
+    if(free===2) return s.len>=Math.max(4,speckle);
+    if(free===1) return s.len>Math.max(4,s.thick*1.2,speckle/2);
+    return true;
+  });
+
+  /* ---- merge through junctions ---- */
+  const dirAt=(s,fromStart)=>{const n=s.length,k=Math.min(n-1,10);
+    const a=fromStart?s[0]:s[n-1], b=fromStart?s[k]:s[n-1-k];
+    return Math.atan2(((b/w)|0)-((a/w)|0),(b%w)-(a%w))};
+  for(let pass=0;pass<4;pass++){
+    const at=new Map();
+    for(const s of live){ if(s.closed) continue;
+      if(s.ca>=0){if(!at.has(s.ca))at.set(s.ca,[]);at.get(s.ca).push([s,true])}
+      if(s.cb>=0){if(!at.has(s.cb))at.set(s.cb,[]);at.get(s.cb).push([s,false])} }
+    const dead=new Set(); let merged=false;
+    for(const [c,list] of at){
+      const L=list.filter(([s])=>!dead.has(s)); if(L.length<2) continue;
+      let best=null,bestDev=L.length===2?Math.PI:0.45;     // 2-way: always join; else near-straight only (~26°)
+      for(let i=0;i<L.length;i++)for(let j=i+1;j<L.length;j++){
+        const [s1,e1]=L[i],[s2,e2]=L[j]; if(s1===s2) continue;
+        let d=Math.abs(dirAt(s1,e1)-dirAt(s2,e2)); if(d>Math.PI) d=2*Math.PI-d;
+        const dev=Math.PI-d; if(dev<bestDev){bestDev=dev;best=[L[i],L[j]]}
+      }
+      if(!best) continue;
+      const [[s1,e1],[s2,e2]]=best;
+      const A=e1?[...s1].reverse():[...s1];                 // A ends at junction
+      const B=e2?[...s2]:[...s2].reverse();                 // B starts at junction
+      const m=A.concat(B);
+      m.thick=(s1.thick*s1.len+s2.thick*s2.len)/(s1.len+s2.len); m.len=m.length;
+      m.ca=e1?s1.cb:s1.ca; m.cb=e2?s2.cb:s2.ca;
+      if(m.ca===c&&m.cb===c){m.closed=true}
+      dead.add(s1); dead.add(s2); live.push(m); merged=true;
+    }
+    live=live.filter(s=>!dead.has(s));
+    if(!merged) break;
+  }
+
+  /* ---- weight classes ---- */
+  const th=live.map(s=>s.thick).sort((a,b)=>a-b), med=th[th.length>>1]||2;
+  const heavyCut=med*1.35, lightCut=med*0.7;
+
+  /* ---- geometry ---- */
+  const groups={heavy:[],medium:[],light:[]};
+  let count=0;
+  for(const s of live){
+    let pts=s.map(p=>[p%w,(p/w)|0]);
+    if(s.closed&&(pts[0][0]!==pts[pts.length-1][0]||pts[0][1]!==pts[pts.length-1][1])) pts.push(pts[0]);
+    pts=rdp(pts,simplify);
+    if(pts.length<2) continue;
+    const d=smooth?bezierPath(pts,s.closed):polyPath(pts,s.closed);
+    const cls=!weights?"medium":s.thick>=heavyCut?"heavy":s.thick<=lightCut?"light":"medium";
+    groups[cls].push(d); count++;
+  }
+  const sw=c=>weights?(c==="heavy"?Math.max(1,heavyCut*1.05):c==="light"?Math.max(.6,lightCut*.9):Math.max(.8,med)).toFixed(2):Math.max(.8,med).toFixed(2);
+  const g=(id,ds)=>ds.length?`<g id="${id}" stroke-width="${sw(id)}">${ds.map(d=>`<path d="${d}"/>`).join("")}</g>`:"";
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" fill="none" stroke="#111111" stroke-linecap="round" stroke-linejoin="round">${g("heavy",groups.heavy)}${g("medium",groups.medium)}${g("light",groups.light)}</svg>`;
+  return {svg,count,polylines:live.length};
+}
+
+/* ---------- helpers ---------- */
+function toInk(src,thr){
+  const w=src.width,h=src.height,d=src.data,ink=new Uint8Array(w*h);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=(y*w+x)*4;
+    const a=d[i+3]/255, l=(.299*d[i]+.587*d[i+1]+.114*d[i+2])*a+255*(1-a);
+    ink[y*w+x]=l<thr?1:0}
+  return {w,h,ink};
+}
+function removeSmall(ink,w,h,minArea){
+  const seen=new Uint8Array(w*h), stack=new Int32Array(w*h), OFF=[-w,-w+1,1,w+1,w,w-1,-1,-w-1];
+  for(let p=0;p<w*h;p++){
+    if(!ink[p]||seen[p]) continue;
+    let sp=0,n=0; const comp=[]; stack[sp++]=p; seen[p]=1;
+    while(sp){const q=stack[--sp]; comp.push(q); n++;
+      for(const o of OFF){const r=q+o; if(ink[r]&&!seen[r]){seen[r]=1;stack[sp++]=r}}}
+    if(n<minArea) for(const q of comp) ink[q]=0;
+  }
+}
+function distanceMap(ink,w,h){               // chamfer 3-4, result in pixels
+  const D=new Float32Array(w*h), INF=1e9;
+  for(let p=0;p<w*h;p++) D[p]=ink[p]?INF:0;
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const p=y*w+x; if(!D[p]) continue;
+    D[p]=Math.min(D[p],D[p-1]+3,D[p-w]+3,D[p-w-1]+4,D[p-w+1]+4)}
+  for(let y=h-2;y>0;y--)for(let x=w-2;x>0;x--){const p=y*w+x; if(!D[p]) continue;
+    D[p]=Math.min(D[p],D[p+1]+3,D[p+w]+3,D[p+w+1]+4,D[p+w-1]+4)}
+  for(let p=0;p<w*h;p++) D[p]/=3;
+  return D;
+}
+function thin(ink,w,h){                       // Zhang-Suen + staircase cleanup
+  let pts=[]; for(let p=0;p<w*h;p++) if(ink[p]) pts.push(p);
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(let sub=0;sub<2;sub++){
+      const del=[];
+      for(const p of pts){ if(!ink[p]) continue;
+        const P2=ink[p-w],P3=ink[p-w+1],P4=ink[p+1],P5=ink[p+w+1],P6=ink[p+w],P7=ink[p+w-1],P8=ink[p-1],P9=ink[p-w-1];
+        const B=P2+P3+P4+P5+P6+P7+P8+P9; if(B<2||B>6) continue;
+        const A=(!P2&&P3)+(!P3&&P4)+(!P4&&P5)+(!P5&&P6)+(!P6&&P7)+(!P7&&P8)+(!P8&&P9)+(!P9&&P2); if(A!==1) continue;
+        if(sub===0){ if(P2*P4*P6||P4*P6*P8) continue } else { if(P2*P4*P8||P2*P6*P8) continue }
+        del.push(p);
+      }
+      for(const p of del) ink[p]=0;
+      if(del.length) changed=true;
+    }
+    pts=pts.filter(p=>ink[p]);
+  }
+  // staircase cleanup: drop pixels that sit in an orthogonal corner and whose
+  // removal keeps their neighbours 8-connected (makes the skeleton 1px "m-connected")
+  const RING=[-w,-w+1,1,w+1,w,w-1,-1,-w-1];       // N NE E SE S SW W NW
+  const ADJ=[[1,7,2,6],[0,2],[1,3,0,4],[2,4],[3,5,2,6],[4,6],[5,7,4,0],[6,0]];
+  let again=true;
+  while(again){
+    again=false;
+    for(const p of pts){ if(!ink[p]) continue;
+      const v=RING.map(o=>ink[p+o]);
+      const B=v.reduce((a,b)=>a+b,0); if(B<2) continue;
+      if(!((v[0]&&v[2])||(v[2]&&v[4])||(v[4]&&v[6])||(v[6]&&v[0]))) continue;
+      let comps=0; const seen=[0,0,0,0,0,0,0,0];
+      for(let i=0;i<8;i++){ if(!v[i]||seen[i]) continue; comps++;
+        const st=[i]; seen[i]=1;
+        while(st.length){const k=st.pop(); for(const j of ADJ[k]) if(v[j]&&!seen[j]){seen[j]=1;st.push(j)}} }
+      if(comps===1){ ink[p]=0; again=true; }
+    }
+    pts=pts.filter(p=>ink[p]);
+  }
+}
+function rdp(pts,eps){
+  if(pts.length<3) return pts;
+  const keep=new Uint8Array(pts.length); keep[0]=keep[pts.length-1]=1;
+  const st=[[0,pts.length-1]];
+  while(st.length){const [a,b]=st.pop(); let md=0,mi=-1;
+    const [x1,y1]=pts[a],[x2,y2]=pts[b],dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy);
+    for(let i=a+1;i<b;i++){const [x,y]=pts[i]; const d=L>1e-9?Math.abs(dy*x-dx*y+x2*y1-y2*x1)/L:Math.hypot(x-x1,y-y1); if(d>md){md=d;mi=i}}
+    if(md>eps){keep[mi]=1; st.push([a,mi],[mi,b])}}
+  return pts.filter((_,i)=>keep[i]);
+}
+const f=n=>Math.round(n*100)/100;
+function polyPath(p,closed){ return "M"+p.map(q=>f(q[0])+" "+f(q[1])).join("L")+(closed?"Z":""); }
+function bezierPath(p,closed){               // Catmull-Rom -> cubic, sharp corners kept
+  if(p.length<3) return polyPath(p,closed);
+  const n=p.length, CORNER=Math.PI*0.12;     // >~22° turn at a vertex = keep as a sharp corner
+  const get=i=>closed?p[(i+n-1)%(n-1)]:p[Math.max(0,Math.min(n-1,i))];
+  const turn=i=>{ if(!closed&&(i===0||i===n-1)) return Math.PI;
+    const a=get(i-1),b=get(i),c=get(i+1);
+    const a1=Math.atan2(b[1]-a[1],b[0]-a[0]),a2=Math.atan2(c[1]-b[1],c[0]-b[0]);
+    let d=Math.abs(a2-a1); if(d>Math.PI) d=2*Math.PI-d; return d; };
+  let d="M"+f(p[0][0])+" "+f(p[0][1]);
+  for(let i=0;i<n-1;i++){
+    const p0=get(i-1),p1=p[i],p2=p[i+1],p3=get(i+2);
+    const seg=Math.hypot(p2[0]-p1[0],p2[1]-p1[1]);
+    const t1=turn(i)>CORNER?0:1, t2=turn(i+1)>CORNER?0:1;
+    // tangent direction from neighbours, handle length = 1/3 of this segment (no overshoot)
+    const tan=(a,b)=>{const dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy)||1;return [dx/L,dy/L]};
+    const u1=tan(p0,p2), u2=tan(p1,p3), k=seg/3;
+    const c1=[p1[0]+u1[0]*k*t1,p1[1]+u1[1]*k*t1];
+    const c2=[p2[0]-u2[0]*k*t2,p2[1]-u2[1]*k*t2];
+    if(!t1&&!t2) d+="L"+f(p2[0])+" "+f(p2[1]);
+    else d+="C"+f(c1[0])+" "+f(c1[1])+" "+f(c2[0])+" "+f(c2[1])+" "+f(p2[0])+" "+f(p2[1]);
+  }
+  return d+(closed?"Z":"");
+}
+
+/* ---------- Silhouette tracer ---------- */
+/* Silhouette: one closed outline of the overall form (no holes), aligned to the
+   centre of the outer drawn line. Uses toInk/removeSmall/distanceMap/rdp/bezierPath. */
+function silhouetteTrace(src,opt){
+  const {thr=160,speckle=8,ground=true,smooth=true,lines=null,close=0.006}=opt||{};
+  let {w,h,ink}=toInk(src,thr), snap=null;
+  removeSmall(ink,w,h,Math.max(1,speckle*speckle/2));
+  const inkBox=bboxOf(ink,w,h);
+  if(ground) removeGroundLine(ink,w,h);
+
+  // typical outer-line thickness (90th percentile of half-widths)
+  const din=distanceMap(ink,w,h); const hw=[];
+  for(let p=0;p<w*h;p+=7) if(ink[p]) hw.push(din[p]);
+  hw.sort((a,b)=>a-b); const half=hw.length?hw[Math.floor(hw.length*.9)]:2;
+  const r=Math.max(4,Math.round(Math.max(w,h)*close)+half);   // gap-bridging radius
+
+  // Build the silhouette from the traced centerline paths, not the thick ink,
+  // so its edge runs exactly along the centerline of the outer perimeter.
+  if(lines&&lines.length){
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const g=c.getContext("2d",{willReadFrequently:true});
+    g.fillStyle="#fff"; g.fillRect(0,0,w,h); g.strokeStyle="#000"; g.lineWidth=1; g.lineJoin="round"; g.lineCap="round";
+    for(const d of lines){ try{ g.stroke(new Path2D(d)); }catch{} }
+    const px=g.getImageData(0,0,w,h).data; ink=new Uint8Array(w*h);
+    for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){ const i=(y*w+x)*4; ink[y*w+x]=px[i]<140?1:0; }
+    if(ground) removeGroundLine(ink,w,h);
+    snap=makeSnapper(lines,2.5);
+  }
+
+  // close gaps: dilate by r
+  const inv=new Uint8Array(w*h); for(let p=0;p<w*h;p++) inv[p]=ink[p]?0:1;
+  const dOut=distanceMap(inv,w,h);
+  const dil=new Uint8Array(w*h); for(let p=0;p<w*h;p++) dil[p]=ink[p]||(inv[p]&&dOut[p]<=r)?1:0;
+
+  // fill holes: anything not reachable from the border is inside
+  const out=new Uint8Array(w*h), st=new Int32Array(w*h); let sp=0;
+  const push=p=>{if(!dil[p]&&!out[p]){out[p]=1;st[sp++]=p}};
+  for(let x=0;x<w;x++){push(x);push((h-1)*w+x)} for(let y=0;y<h;y++){push(y*w);push(y*w+w-1)}
+  while(sp){const p=st[--sp],x=p%w; if(x>0)push(p-1); if(x<w-1)push(p+1); if(p>=w)push(p-w); if(p<w*(h-1))push(p+w)}
+  const fill=new Uint8Array(w*h); for(let p=0;p<w*h;p++) fill[p]=out[p]?0:1;
+  for(let x=0;x<w;x++){fill[x]=0;fill[(h-1)*w+x]=0} for(let y=0;y<h;y++){fill[y*w]=0;fill[y*w+w-1]=0}
+
+  // erode back by r (a morphological close): thin single-line parts such as legs survive,
+  // and the edge lands on the outermost centerline
+  const dIn=distanceMap(fill,w,h), shape=new Uint8Array(w*h);
+  for(let p=0;p<w*h;p++) shape[p]=fill[p]&&dIn[p]>r-0.5?1:0;
+
+  // components: keep the main form and any large detached parts
+  const lab=new Int32Array(w*h), sizes=[0], starts=[0];
+  for(let p=0;p<w*h;p++){ if(!shape[p]||lab[p]) continue;
+    const id=sizes.length; let n=0; sp=0; st[sp++]=p; lab[p]=id;
+    while(sp){const q=st[--sp]; n++;
+      for(const o of [-w,w,-1,1]){const s=q+o; if(shape[s]&&!lab[s]){lab[s]=id;st[sp++]=s}}}
+    sizes.push(n); starts.push(p); }
+  const big=Math.max(0,...sizes);
+  const paths=[], keep=new Uint8Array(sizes.length);
+  for(let id=1;id<sizes.length;id++){
+    if(sizes[id]<big*0.05) continue;
+    keep[id]=1;
+    let pts=traceBoundary(lab,id,starts[id],w);
+    if(pts.length<8) continue;
+    if(snap) pts=pts.map(snap);
+    pts.push(pts[0]);
+    pts=rdp(pts,snap?0.35:1.2);                     // snapped points lie on the centerline: keep them tight
+    paths.push(smooth?bezierPath(pts,true):polyPath(pts,true));
+  }
+  let x0=w,y0=h,x1=-1,y1=-1;
+  for(let p=0;p<w*h;p++) if(lab[p]&&keep[lab[p]]){const x=p%w,y=(p/w)|0; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y}
+  const objBox=x1<0?inkBox:[x0,y0,x1+1,y1+1];
+  return {paths,objBox,inkBox};
+}
+function bboxOf(m,w,h){
+  let x0=w,y0=h,x1=-1,y1=-1;
+  for(let p=0;p<w*h;p++) if(m[p]){const x=p%w,y=(p/w)|0; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y}
+  return x1<0?[0,0,w,h]:[x0,y0,x1+1,y1+1];
+}
+
+/* Mask-guided fill: the drawing's own centerlines split the sheet into regions; a region is filled when
+   most of its pixels are plant in the mask. Background between parts becomes holes (even-odd). */
+function regionSilhouette(src,lines,maskBmp,opt){
+  const {ground=true,smooth=true}=opt||{};
+  const w=src.width,h=src.height,N=w*h;
+  // walls: the traced centerlines, 1px
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const g=c.getContext("2d",{willReadFrequently:true});
+  g.fillStyle="#fff"; g.fillRect(0,0,w,h); g.strokeStyle="#000"; g.lineWidth=1; g.lineJoin="round"; g.lineCap="round";
+  for(const d of lines){ try{ g.stroke(new Path2D(d)); }catch{} }
+  let px=g.getImageData(0,0,w,h).data; const wall=new Uint8Array(N);
+  for(let p=0;p<N;p++) wall[p]=px[p*4]<140?1:0;
+  if(ground) removeGroundLine(wall,w,h);
+  // mask, resampled to the drawing size
+  g.fillStyle="#fff"; g.fillRect(0,0,w,h); g.drawImage(maskBmp,0,0,w,h);
+  px=g.getImageData(0,0,w,h).data; const plant=new Uint8Array(N);
+  for(let p=0;p<N;p++){const i=p*4; plant[p]=(.299*px[i]+.587*px[i+1]+.114*px[i+2])<128?1:0;}
+  // regions = areas farther than r from any line (bridges small gaps in outlines)
+  const r=Math.max(2,Math.round(Math.max(w,h)*0.0025));
+  const notWall=new Uint8Array(N); for(let p=0;p<N;p++) notWall[p]=wall[p]?0:1;
+  const dW=distanceMap(notWall,w,h);
+  const free=new Uint8Array(N); for(let p=0;p<N;p++) free[p]=notWall[p]&&dW[p]>r?1:0;
+  const lab=new Int32Array(N), st=new Int32Array(N), tot=[0], pl=[0], edge=[0];
+  for(let p=0;p<N;p++){ if(!free[p]||lab[p]) continue;
+    const id=tot.length; let n=0,k=0,e=0,sp=0; st[sp++]=p; lab[p]=id;
+    while(sp){const q=st[--sp]; n++; k+=plant[q]; const x=q%w,y=(q/w)|0; if(x<2||y<2||x>w-3||y>h-3) e=1;
+      for(const o of [-w,w,-1,1]){const s=q+o; if(s>=0&&s<N&&free[s]&&!lab[s]){lab[s]=id;st[sp++]=s}}}
+    tot.push(n); pl.push(k); edge.push(e); }
+  const sel=new Uint8Array(tot.length);
+  for(let id=1;id<tot.length;id++) sel[id]=!edge[id]&&pl[id]>0.5*tot[id]?1:0;
+  // every pixel near a line joins the region on its own side: spread outward from the regions
+  // without ever crossing a drawn line (geodesic). Sealed pockets with no region fall back to the mask.
+  const N8=[-w-1,-w,-w+1,-1,1,w-1,w,w+1];
+  const q=new Int32Array(N); let qh=0,qt=0;
+  for(let p=0;p<N;p++) if(lab[p]) q[qt++]=p;
+  while(qh<qt){const p=q[qh++],id=lab[p];
+    for(const o of [-w,w,-1,1]){const s=p+o; if(s>=0&&s<N&&!lab[s]&&!wall[s]){lab[s]=id;q[qt++]=s}}}
+  const shape=new Uint8Array(N);
+  for(let p=0;p<N;p++){ if(!wall[p]) shape[p]=lab[p]?sel[lab[p]]:plant[p]; }
+  // the line pixels themselves join the fill wherever they touch it, so the edge sits on the centerline
+  const add=[];
+  for(let p=w+1;p<N-w-1;p++) if(wall[p]) for(const o of N8){const s=p+o; if(shape[s]&&!wall[s]){add.push(p);break}}
+  for(const p of add) shape[p]=1;
+  for(let x=0;x<w;x++){shape[x]=0;shape[(h-1)*w+x]=0} for(let y=0;y<h;y++){shape[y*w]=0;shape[y*w+w-1]=0}
+  // label solid parts (4-conn) and holes (8-conn complement, not touching the border)
+  const sl=new Int32Array(N), ss=[0], s0=[0];
+  for(let p=0;p<N;p++){ if(!shape[p]||sl[p]) continue;
+    const id=ss.length; let n=0,sp=0; st[sp++]=p; sl[p]=id;
+    while(sp){const q=st[--sp]; n++; for(const o of [-w,w,-1,1]){const s=q+o; if(shape[s]&&!sl[s]){sl[s]=id;st[sp++]=s}}}
+    ss.push(n); s0.push(p); }
+  const big=Math.max(0,...ss); if(!big) return [];
+  const hl=new Int32Array(N), hs=[0], h0=[0], hEdge=[0], hPl=[0];
+  for(let p=0;p<N;p++){ if(shape[p]||hl[p]) continue;
+    const id=hs.length; let n=0,e=0,k=0,sp=0; st[sp++]=p; hl[p]=id;
+    while(sp){const q=st[--sp]; n++; k+=plant[q]; const x=q%w,y=(q/w)|0; if(x===0||y===0||x===w-1||y===h-1){e=1; continue}
+      for(const o of N8){const s=q+o; if(!shape[s]&&!hl[s]){hl[s]=id;st[sp++]=s}}}
+    hs.push(n); h0.push(p); hEdge.push(e); hPl.push(k); }
+  const snap=makeSnapper(lines,2.5), minHole=(3*r)*(3*r);
+  const ring=(labArr,id,start)=>{ let pts=traceBoundary(labArr,id,start,w); if(pts.length<8) return "";
+    pts=pts.map(snap); pts.push(pts[0]); pts=rdp(pts,0.35); return smooth?bezierPath(pts,true):polyPath(pts,true); };
+  const holesOf=new Map();
+  for(let id=1;id<hs.length;id++){ if(hEdge[id]||hs[id]<minHole||hPl[id]>0.5*hs[id]) continue;   // keep real background only
+    const owner=sl[h0[id]-w]; if(!owner) continue;
+    if(!holesOf.has(owner)) holesOf.set(owner,[]); holesOf.get(owner).push(id); }
+  const out=[];
+  for(let id=1;id<ss.length;id++){
+    if(ss[id]<big*0.004) continue;
+    let d=ring(sl,id,s0[id]); if(!d) continue;
+    for(const hid of holesOf.get(id)||[]){ const hd=ring(hl,hid,h0[hid]); if(hd) d+=hd; }
+    out.push(d);
+  }
+  return out;
+}
+
+/* snap points onto the exact centerline curves (sampled every ~0.25px) */
+function makeSnapper(ds,maxD){
+  const pts=[];
+  for(const d of ds){
+    const t=d.match(/[MLCZ]|-?\d*\.?\d+(?:e-?\d+)?/gi)||[]; let i=0,cx=0,cy=0,sx=0,sy=0,cmd="";
+    const num=()=>parseFloat(t[i++]);
+    while(i<t.length){
+      if(/[MLCZ]/i.test(t[i])) cmd=t[i++].toUpperCase();
+      if(cmd==="M"){cx=num();cy=num();sx=cx;sy=cy;pts.push([cx,cy]);cmd="L"}
+      else if(cmd==="L"||cmd==="Z"){
+        const [x,y]=cmd==="Z"?[sx,sy]:[num(),num()];
+        const n=Math.max(1,Math.ceil(Math.hypot(x-cx,y-cy)*4));
+        for(let k=1;k<=n;k++) pts.push([cx+(x-cx)*k/n,cy+(y-cy)*k/n]);
+        cx=x;cy=y; if(cmd==="Z") cmd="";
+      }else if(cmd==="C"){
+        const x1=num(),y1=num(),x2=num(),y2=num(),x=num(),y=num();
+        const n=Math.max(2,Math.ceil((Math.hypot(x1-cx,y1-cy)+Math.hypot(x2-x1,y2-y1)+Math.hypot(x-x2,y-y2))*4));
+        for(let k=1;k<=n;k++){const u=k/n,v=1-u;
+          pts.push([v*v*v*cx+3*v*v*u*x1+3*v*u*u*x2+u*u*u*x, v*v*v*cy+3*v*v*u*y1+3*v*u*u*y2+u*u*u*y]);}
+        cx=x;cy=y;
+      }else i++;
+    }
+  }
+  const G=new Map(), key=(x,y)=>((x/4)|0)*100003+((y/4)|0);
+  for(const p of pts){const k=key(p[0],p[1]); let a=G.get(k); if(!a)G.set(k,a=[]); a.push(p)}
+  return ([x,y])=>{
+    let best=null,bd=maxD; const gx=(x/4)|0, gy=(y/4)|0;
+    for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++){const a=G.get((gx+i)*100003+(gy+j)); if(a) for(const p of a){const d=Math.hypot(p[0]-x,p[1]-y); if(d<bd){bd=d;best=p}}}
+    return best?[best[0],best[1]]:[x,y];
+  };
+}
+
+/* radial-sweep boundary trace of one labelled component (8-connected), clockwise */
+function traceBoundary(lab,id,start,w){
+  const DX=[1,1,0,-1,-1,-1,0,1], DY=[0,1,1,1,0,-1,-1,-1];   // E SE S SW W NW N NE (clockwise, y down)
+  const at=(x,y)=>lab[y*w+x]===id;
+  let x=start%w, y=(start/w)|0, back=4, firstDir=-1;
+  const pts=[[x,y]], max=4e6;
+  for(let i=0;i<max;i++){
+    let d=-1;
+    for(let k=1;k<=8;k++){const t=(back+k)%8; if(at(x+DX[t],y+DY[t])){d=t;break}}
+    if(d<0) break;                                   // isolated pixel
+    if(firstDir<0) firstDir=d;
+    else if(x===start%w&&y===((start/w)|0)&&d===firstDir) break;
+    x+=DX[d]; y+=DY[d]; back=(d+4)%8;
+    pts.push([x,y]);
+  }
+  pts.pop();
+  return pts;
+}
+
+/* remove a long horizontal ground line near the bottom (elevations only) */
+function removeGroundLine(ink,w,h){
+  let best=-1;
+  for(let y=h-2;y>h*0.4;y--){
+    let run=0,maxRun=0; for(let x=0;x<w;x++){ if(ink[y*w+x]){run++; if(run>maxRun)maxRun=run} else run=0 }
+    if(maxRun>=w*0.4){best=y;break}
+  }
+  if(best<0) return;
+  // band of rows around it that also carry a long run
+  let y0=best,y1=best;
+  const longRow=y=>{let run=0,m=0;for(let x=0;x<w;x++){if(ink[y*w+x]){run++;if(run>m)m=run}else run=0}return m>=w*0.3};
+  while(y0>1&&longRow(y0-1)&&best-y0<h*0.03) y0--;
+  while(y1<h-2&&longRow(y1+1)&&y1-best<h*0.03) y1++;
+  for(let y=y0-1;y<=y1+1;y++) for(let x=0;x<w;x++) ink[y*w+x]=0;
+}
+
+/* ---------- Silhouette layer + object extents ---------- */
+function silhouetteFor(svg){
+  const c=document.createElement("canvas"); c.width=state.raster.width; c.height=state.raster.height;
+  const g=c.getContext("2d",{willReadFrequently:true}); g.fillStyle="#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(state.raster,0,0);
+  const img=g.getImageData(0,0,c.width,c.height);
+  const center=traceMode==="center"?svg:centerlineTrace(img,{thr:+$("#thr").value,speckle:+$("#turd").value,
+    simplify:+$("#simp").value/10,smooth:$("#curves").checked,weights:false}).svg;
+  const lines=[...center.matchAll(/<path d="([^"]+)"/g)].map(m=>m[1]);
+  const ground=(curVer()?.view||state.view)!=="top";
+  const sil=silhouetteTrace(img,{lines,close:M().close,thr:+$("#thr").value,speckle:+$("#turd").value,ground,smooth:$("#curves").checked});
+  return {objBox:sil.objBox,inkBox:sil.inkBox,paths:sil.paths,lines,img,ground};
+}
+function silLayer(paths,w){
+  if(!paths||!paths.length) return "";
+  const sw=Math.max(1,w/1000).toFixed(2);
+  return `<g id="silhouette" fill="#2f6fb0" fill-opacity="0.12" fill-rule="evenodd" stroke="#2f6fb0" stroke-width="${sw}" stroke-linejoin="round">${paths.map(d=>`<path d="${d}"/>`).join("")}</g>`;
+}
+async function finishTrace(svg){
+  const r=silhouetteFor(svg);
+  const masked=!!M().maskFill;                 // plants: fill decided by a Nano Banana mask (see ensureFill)
+  state.raw={svg,obj:r.objBox,ink:r.inkBox,view:curVer()?.view||state.view,lines:r.lines,img:r.img,ground:r.ground,
+    ver:state.cur,sil:masked?null:silLayer(r.paths,r.img.width)};
+  if(masked && $("#silh").checked) await ensureFill().catch(e=>step(2,"err",`Fill shape: ${String(e.message||e).slice(0,140)}`));
+  compose(); updateSizePanel();
+}
+/* Plants: ask Nano Banana for a solid mask of the drawing (cached per version), then fill only the
+   regions of the drawing that the mask says are plant. Edges still come from the traced centerlines. */
+async function ensureFill(){
+  const raw=state.raw; if(!raw||raw.sil!==null||!M().maskFill) return;
+  const v=state.versions[raw.ver]; if(!v) return;
+  if(!v.mask){
+    const prev=$("#p2m").textContent;
+    step(2,"run","Finding the plant's parts for the fill shape…");
+    const blob=await nano([{text:M().maskPrompt},await imgPart(v.blob)]);
+    v.mask=await createImageBitmap(blob);
+    step(2,"done",prev);
+  }
+  const paths=regionSilhouette(raw.img,raw.lines,v.mask,{ground:raw.ground,smooth:$("#curves").checked});
+  if(!paths.length) throw new Error("couldn't match the mask to the drawing; try Redraw or another version.");
+  raw.sil=silLayer(paths,raw.img.width);
+}
+function setVector(svg){ state.svg=svg; $("#vectorStage").innerHTML=svg; }
+
+/* ---------- Size: Gemini estimate ---------- */
+const AXIS_NAME={w:"width",d:"depth",h:"height"};
+const fmtFtIn=x=>{const t=Math.round(x/6)*6,ft=Math.floor(t/12),i=t%12;return `${ft}'-${i}"`;};   // nearest 6", matches the panel's half-foot values
+const fmtLen=x=>state.mode==="plants"?fmtFtIn(x):fmtIn(x);
+const fmtIn=x=>{const v=Math.round(x*2)/2,wh=Math.floor(v),hf=v-wh>0?"½":"";return `${wh||(hf?"":0)}${hf}"`;};
+
+async function textModel(){
+  const saved=store.get("text_model"); if(saved) return saved;
+  try{
+    const r=await fetch(`${API}/models?pageSize=300`,{headers:{"x-goog-api-key":getKey()}});
+    const j=await r.json();
+    const ms=(j.models||[]).map(m=>m.name).filter(n=>/gemini/.test(n)&&!/image|tts|live|audio|embed|banana|lite|robotics|computer/.test(n));
+    const ver=n=>parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0);
+    ms.sort((a,b)=>(ver(b)-ver(a))||((/flash/.test(b))-(/flash/.test(a)))||(/preview|exp/.test(a)-/preview|exp/.test(b)));
+    const pick=ms.find(n=>/flash/.test(n))||ms[0];
+    if(pick){ store.set("text_model",pick); return pick; }
+  }catch{}
+  return "models/gemini-flash-latest";
+}
+
+async function estimateSize(){
+  sizeNote("Estimating size with Gemini…");
+  const stAtStart=state;
+  const model=await textModel();
+  const st=state, prompt=M().sizePrompt, fac=M().estFactor;
+  const body={contents:[{parts:[{text:prompt},await imgPart(await downscale(state.file))]}],
+    generationConfig:{responseMimeType:"application/json",temperature:0.2}};
+  const r=await fetch(`${API}/${model}:generateContent`,{method:"POST",
+    headers:{"Content-Type":"application/json","x-goog-api-key":getKey()},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ if(r.status===404) store.set("text_model",""); throw new Error(`${r.status} ${j.error?.message||""}`.trim()); }
+  const txt=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+  let o; try{ o=JSON.parse(txt) }catch{ o=JSON.parse((txt.match(/\{[\s\S]*\}/)||["{}"])[0]) }
+  const n=v=>{const x=parseFloat(v)*fac;return x>0&&x<20000?Math.round(x*2)/2:null};
+  const s={w:n(o.width),d:n(o.depth),h:n(o.height),name:String(o.name||"").slice(0,60),conf:o.confidence||"",src:"gemini"};
+  if(!s.w&&!s.d&&!s.h) throw new Error("Gemini didn't return usable dimensions.");
+  st.size=s; st.est={w:s.w,d:s.d,h:s.h};
+  st.known={w:s.w,d:s.d,h:s.h}; st.lastKey=null;
+  if(st!==state) return s;                                  // user switched tabs meanwhile: store quietly
+  fillSizeInputs(); updateSizePanel();
+  sizeNote(`Gemini estimate${s.conf?` · ${s.conf} confidence`:""}. Type over it if you know the size.`);
+  if(s.name){ $("#tbName").textContent=s.name; }
+  compose();
+  return s;
+}
+function startEstimate(){
+  setTimeout(updateSizePanel);
+  const st=state;
+  state.sizeP=estimateSize().catch(e=>{ if(st!==state){ st.note=""; return; } sizeNote(`Couldn't estimate size (${String(e.message).slice(0,70)}). Type it in to scale the drawing.`,true); });
+  return state.sizeP;
+}
+/* Size model: one uniform scale (inches per drawing pixel) per traced drawing.
+   The two dimensions visible in the current view are ratio-locked to the drawing's bounding box;
+   the third (not visible in this view) is kept as entered/estimated and used by the other views. */
+state.known={}; state.lastKey=null;
+const r2=x=>Math.round(x*2)/2;
+function fillSizeInputs(){
+  ["w","d","h"].forEach(k=>{ const el=$("#sz"+k.toUpperCase()); if(document.activeElement===el) return;
+    const v=state.known[k]; el.value=v?r2(v/M().unit):""; });
+}
+function sizeNote(t,err){ const n=$("#sizeNote"); n.textContent=t; n.classList.toggle("err",!!err); state.note=t; state.noteErr=!!err; }
+function readDims(){ return {w:state.known.w||null,d:state.known.d||null,h:state.known.h||null}; }
+function updateSizePanel(){
+  const onVector=$("#tabVector").getAttribute("aria-selected")==="true";
+  const show=onVector&&!!(state.raw||state.size||state.sizeP), col=$("#sizePanel").classList.contains("collapsed");
+  $("#sizePanel").hidden=!show;
+  const wide=$(".canvas").clientWidth>720;                 // narrow canvas: let the panel float over instead
+  $(".canvas").classList.toggle("sp-open",show&&!col&&wide);
+  $(".canvas").classList.toggle("sp-collapsed",show&&col);
+  const d=readDims(), parts=[["W",d.w],["D",d.d],["H",d.h]].filter(([,v])=>v).map(([k,v])=>`${k} ${r2(v/M().unit)}`);
+  $("#sizeChip").textContent=parts.length?parts.join(" · ")+" "+M().unitLabel:"Size";
+  $("#sizeLabel").textContent="Overall size · "+M().unitLabel;
+  // mark which two fields are ratio-locked in this view
+  const ax=axesFor(state.raw?.view||curVer()?.view||state.view);
+  ["w","d","h"].forEach(k=>{ const lab=$("#sz"+k.toUpperCase()).parentElement; const on=ax.includes(k);
+    lab.classList.toggle("linked",on); lab.classList.toggle("offview",!on);
+    lab.title=on?"Locked to the drawing's proportions: changing this rescales the drawing":"Not visible in this view"; });
+}
+let sizeFrame;
+["w","d","h"].forEach(k=>{
+  const el=$("#sz"+k.toUpperCase());
+  el.addEventListener("input",()=>{
+    const v=parseFloat(el.value)*M().unit; if(!(v>0)) return;
+    state.known[k]=v; state.lastKey=k;
+    if(state.size) state.size.src="user";
+    sizeNote(axesFor(state.raw?.view||state.view).includes(k)?"Ratio locked to the bounding box: the other dimension follows.":"Used for the other views.");
+    cancelAnimationFrame(sizeFrame); sizeFrame=requestAnimationFrame(()=>{ compose(); updateSizePanel(); });   // live, every keystroke / arrow step
+  });
+  el.addEventListener("blur",()=>fillSizeInputs());
+});
+function setSizeCollapsed(c){
+  $("#sizePanel").classList.toggle("collapsed",c);
+  $("#sizeToggle").textContent=c?"+":"–";
+  $("#sizeToggle").setAttribute("aria-expanded",!c);
+  $("#sizeToggle").setAttribute("aria-label",c?"Expand size panel":"Collapse size panel");
+  store.set("size_collapsed",c?"1":"");
+  updateSizePanel();
+}
+window.addEventListener("resize",()=>updateSizePanel());
+$("#sizeToggle").onclick=()=>setSizeCollapsed(!$("#sizePanel").classList.contains("collapsed"));
+setSizeCollapsed(store.get("size_collapsed")==="1");
+$("#bbox").addEventListener("change",()=>compose());
+
+/* ---------- Compose: scale to inches, add dimensions + graphic scale ---------- */
+function compose(){
+  const raw=state.raw; if(!raw) return;
+  const [hk,vk]=axesFor(raw.view), K=state.known;
+  const [bx0,by0,bx1,by1]=raw.obj, pw=Math.max(1,bx1-bx0), ph=Math.max(1,by1-by0);
+  const ext={[hk]:pw,[vk]:ph};
+  // one uniform scale (inches per pixel): from the dimension the user last typed if it is in this view,
+  // otherwise the best fit to both known dimensions (e.g. Gemini's estimate)
+  let s=null;
+  if(state.lastKey&&ext[state.lastKey]&&K[state.lastKey]) s=K[state.lastKey]/ext[state.lastKey];
+  else if(K[hk]&&K[vk]) s=Math.sqrt((K[hk]/pw)*(K[vk]/ph));
+  else if(K[hk]) s=K[hk]/pw; else if(K[vk]) s=K[vk]/ph;
+  $("#tbScale").textContent=s?"Graphic":"NTS";
+  const lineSvg=($("#silh").checked&&raw.sil)?raw.svg.replace(/(<svg\b[^>]*>)/,"$1"+raw.sil):raw.svg;   // fill sits under the line work
+  if(!s){ setVector(lineSvg); $("#sizeFit").textContent=""; fillSizeInputs(); return; }
+  const est0=state.est&&!state.lastKey?{h:state.est[hk],v:state.est[vk]}:null;
+  K[hk]=pw*s; K[vk]=ph*s;                                  // the box defines the two visible dimensions
+  fillSizeInputs();
+  const sx=s, sy=s;
+
+  const doc=new DOMParser().parseFromString(lineSvg,"image/svg+xml"), root=doc.documentElement;
+  const skip=new Set(["xmlns","viewBox","width","height","version","preserveAspectRatio","style"]);
+  const attrs=[...root.attributes].filter(a=>!skip.has(a.name)).map(a=>`${a.name}="${a.value}"`).join(" ");
+  const inner=[...root.childNodes].map(n=>new XMLSerializer().serializeToString(n)).join("").replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g,"");
+  const W=pw*sx, H=ph*sy;                                 // object size in inches
+  const [ix0,iy0,ix1,iy1]=raw.ink.map((v,i)=>i%2?(v-by0)*sy:(v-bx0)*sx);
+  const T=Math.min(M().textMax,Math.max(0.6,Math.max(W,H)*0.035)); // text height (in)
+  const lw=+(T*0.06).toFixed(3), ink="#111111", tick=T*0.35;
+  const n=v=>+v.toFixed(3);
+  const font=`font-family="Arial, Helvetica, sans-serif"`;
+  const slash=(x,y)=>`<line x1="${n(x-tick)}" y1="${n(y+tick)}" x2="${n(x+tick)}" y2="${n(y-tick)}" stroke-width="${n(lw*2.2)}"/>`;
+
+  // overall horizontal dimension (below)
+  const dy=Math.max(H,iy1)+T*2.2, gap=T*0.5;
+  let dimsSvg=`<line x1="0" y1="${n(H+gap)}" x2="0" y2="${n(dy+T*0.6)}"/><line x1="${n(W)}" y1="${n(H+gap)}" x2="${n(W)}" y2="${n(dy+T*0.6)}"/>`
+    +`<line x1="${n(-T*0.6)}" y1="${n(dy)}" x2="${n(W+T*0.6)}" y2="${n(dy)}"/>${slash(0,dy)}${slash(W,dy)}`
+    +`<text x="${n(W/2)}" y="${n(dy-T*0.45)}" text-anchor="middle" font-size="${n(T)}" ${font} fill="${ink}" stroke="none">${fmtLen(W)}</text>`;
+  // overall vertical dimension (right)
+  const dx=Math.max(W,ix1)+T*2.2;
+  dimsSvg+=`<line x1="${n(W+gap)}" y1="0" x2="${n(dx+T*0.6)}" y2="0"/><line x1="${n(W+gap)}" y1="${n(H)}" x2="${n(dx+T*0.6)}" y2="${n(H)}"/>`
+    +`<line x1="${n(dx)}" y1="${n(-T*0.6)}" x2="${n(dx)}" y2="${n(H+T*0.6)}"/>${slash(dx,0)}${slash(dx,H)}`
+    +`<text x="${n(dx-T*0.45)}" y="${n(H/2)}" text-anchor="middle" font-size="${n(T)}" ${font} fill="${ink}" stroke="none" transform="rotate(-90 ${n(dx-T*0.45)} ${n(H/2)})">${fmtLen(H)}</text>`;
+
+  // graphic scale 0–24", top-left of the sheet, above the drawing
+  const est=state.size?.src==="gemini", bh=T*0.4;
+  const gx=Math.min(0,ix0), gy=Math.min(0,iy0)-T*1.6-bh-T*(est?1.9:0.85);
+  // furniture: fixed 0–24"; plants: a feet scale sized to the plant (2' … 64')
+  let segs,ticks,title,SL;
+  if(state.mode==="plants"){
+    const L=[2,4,8,16,32,64].filter(f=>f*12<=Math.max(W,H)*0.5).pop()||2; SL=L*12;
+    segs=[[0,SL/8],[SL/8,SL/4],[SL/4,SL/2],[SL/2,SL]];
+    ticks=[[0,"0"],[SL/4,String(L/4)],[SL/2,String(L/2)],[SL,L+"'"]]; title="GRAPHIC SCALE (FEET)";
+  }else{
+    SL=24; segs=[[0,3],[3,6],[6,12],[12,24]];
+    ticks=[[0,"0"],[3,"3"],[6,"6"],[12,"12"],[24,'24"']]; title="GRAPHIC SCALE (INCHES)";
+  }
+  let scaleSvg=`<text x="${n(gx)}" y="${n(gy-T*0.45)}" font-size="${n(T*0.6)}" ${font} letter-spacing="${n(T*0.06)}" fill="${ink}" stroke="none">${title}</text>`;
+  segs.forEach(([a,b],i)=>{ scaleSvg+=`<rect x="${n(gx+a)}" y="${n(gy)}" width="${n(b-a)}" height="${n(bh)}" fill="${i%2?"#ffffff":ink}"/>`; });
+  scaleSvg+=`<rect x="${n(gx)}" y="${n(gy)}" width="${n(SL)}" height="${n(bh)}" fill="none"/>`;
+  ticks.forEach(([v,t])=>{ scaleSvg+=`<text x="${n(gx+v)}" y="${n(gy+bh+T*0.85)}" text-anchor="middle" font-size="${n(T*0.6)}" ${font} fill="${ink}" stroke="none">${t}</text>`; });
+  if(est) scaleSvg+=`<text x="${n(gx)}" y="${n(gy+bh+T*1.9)}" font-size="${n(T*0.5)}" ${font} fill="#666666" stroke="none">Overall dimensions estimated from photo</text>`;
+
+  const pad=T*1.5;
+  const minX=Math.min(0,ix0,gx)-pad, minY=gy-T*1.2-pad;
+  const maxX=Math.max(dx+T*0.9,ix1,gx+SL+T*0.8)+pad, maxY=Math.max(dy+T*0.7,iy1)+pad;
+  const VW=maxX-minX, VH=maxY-minY;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(minX)} ${n(minY)} ${n(VW)} ${n(VH)}" width="${n(VW)}in" height="${n(VH)}in">`
+    +`<g id="drawing" transform="matrix(${+s.toFixed(6)} 0 0 ${+s.toFixed(6)} ${n(-bx0*s)} ${n(-by0*s)})" ${attrs}>${inner}</g>`
+    +($("#bbox").checked?`<g id="bounding-box" fill="none" stroke="#7a7a7a" stroke-width="${lw}" stroke-dasharray="${n(T*0.5)} ${n(T*0.3)}"><rect x="0" y="0" width="${n(W)}" height="${n(H)}"/></g>`:"")
+    +`<g id="dimensions" fill="none" stroke="${ink}" stroke-width="${lw}" stroke-linecap="butt">${dimsSvg}</g>`
+    +`<g id="graphic-scale" stroke="${ink}" stroke-width="${lw}">${scaleSvg}</g></svg>`;
+  setVector(svg);
+  const ab={w:"W",d:"D",h:"H"};
+  let msg=`Box: ${ab[hk]} ${fmtLen(W)} × ${ab[vk]} ${fmtLen(H)} · ratio locked`;
+  if(est0&&est0.h&&est0.v&&(Math.abs(r2(est0.h)-r2(W))>=0.5||Math.abs(r2(est0.v)-r2(H))>=0.5))
+    msg+=` (Gemini guessed ${fmtLen(est0.h)} × ${fmtLen(est0.v)}; fitted to the drawing)`;
+  $("#sizeFit").textContent=msg;
+}
+
+/* ---------- Run ---------- */
+$("#go").onclick=async()=>{
+  const v=curVer();
+  try{
+    if(!v || v.view!==state.view){ await drawFromPhoto(); showTab("raster"); }
+    setBusy(true,"Tracing…");
+    if(state.sizeP) await state.sizeP;
+    try{ await stage2(); state.vectorOf=state.cur; renderHistory(); showTab("vector"); }
+    catch(e){ step(2,"err",String(e.message||e)); }
+    const label=viewInfo(curVer().view).label;
+    $("#tbName").textContent=state.size?.name||state.name.replace(/[-_]+/g," "); $("#tbView").textContent=label+` · v${curVer().n}`;
+  }catch(e){ step(1,"err",String(e.message||e)); }
+  finally{ setBusy(false); }
+};
+
+/* ---------- Export ---------- */
+function save(blob,name){ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+$("#dlBtn").onclick=()=>save(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${state.svg}`],{type:"image/svg+xml"}),`${state.name}-${curVer()?.view||state.view}-v${state.versions[state.vectorOf]?.n||0}.svg`);
+$("#pngBtn").onclick=async()=>state.rasterUrl&&save(await (await fetch(state.rasterUrl)).blob(),`${state.name}-${curVer()?.view||state.view}-v${curVer()?.n||0}.png`);
+$("#copyBtn").onclick=async()=>{ try{ await navigator.clipboard.writeText(state.svg); step(2,$("#p2").dataset.s||"","SVG copied."); }catch{ step(2,"err","Couldn't copy — use Download SVG."); } };
+
+function applyMode(){
+  const m=state.mode, cfg=M();
+  document.querySelectorAll(".modes button").forEach(b=>b.setAttribute("aria-selected",b.dataset.mode===m));
+  document.body.dataset.mode=m;
+  drop.setAttribute("aria-label",m==="plants"?"Choose a plant photo":"Choose a furniture photo");
+  $("#chatIn").placeholder=cfg.chat;
+  renderViewSeg(); renderOpts(); showPhoto();
+  if(state.versions.length) selectVersion(state.cur);
+  else{
+    $("#thumbImg").hidden=true; $("#thumbBadge").hidden=true; $("#thumbPh").hidden=false; $("#thumb").disabled=true;
+    $("#drawPanel").hidden=true; $("#pngBtn").disabled=true;
+    $("#rasterStage").innerHTML='<p class="empty">The line drawing from step 1 appears here.</p>';
+  }
+  renderHistory();
+  step(1,state.versions.length?"done":"",state.versions.length?`v${curVer().n} ready`:"");
+  step(2,state.raw?"done":"",state.raw?`Traced v${state.versions[state.vectorOf]?.n??""}`:"");
+  $("#go").disabled=!state.file; $("#fromPhoto").disabled=!state.file;
+  if(state.raw) compose(); else { setVector(cfg.example); $("#tbScale").textContent="NTS"; $("#sizeFit").textContent=""; }
+  fillSizeInputs(); $("#sizeNote").textContent=state.note||""; $("#sizeNote").classList.toggle("err",!!state.noteErr);
+  $("#tbName").textContent=state.size?.name||(state.file?state.name.replace(/[-_]+/g," "):cfg.exampleName);
+  $("#tbView").textContent=state.raw?`${viewInfo(state.raw.view).label} · v${state.versions[state.vectorOf]?.n??""}`:viewInfo(state.view).label;
+  updateGoLabel(); updateSizePanel();
+}
+function switchMode(m){
+  if(busy||m===state.mode||!MODES[m]) return;
+  sessions[state.mode]=state;
+  state=sessions[m]||freshState(m);
+  store.set("mode",m);
+  applyMode();
+}
+document.querySelectorAll(".modes button").forEach(b=>b.onclick=()=>switchMode(b.dataset.mode));
+applyMode();
+</script>
+</body>
+</html>
