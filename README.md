@@ -9,8 +9,13 @@ Single-file web app that turns a photo of a piece of furniture or a plant into a
 
 ## Use
 
-1. Open `index.html` in a browser (or serve the folder, e.g. `python3 -m http.server 8000`).
-2. Click **Settings** and paste a Gemini API key. It is stored only in your browser.
-3. Drop a photo, pick a view, press **Generate drawing**.
+**On Vercel (recommended):** deploy with the **Other** preset and set these environment variables:
+
+- `GEMINI_API_KEY` (required): your Gemini key. The page calls `api/gemini.js`, which adds the key on the server, so it never reaches the browser.
+- `APP_PASSWORD` (optional): if set, visitors must enter this under **Settings → Site password** before the app works.
+
+**Locally:** open `index.html` (or serve the folder, e.g. `python3 -m http.server 8000`), click **Settings** and paste a Gemini API key. It is stored only in your browser.
+
+Then drop a photo, pick a view, and press **Generate drawing**.
 
 If you restrict the API key by website, run it from a local server and allow that address (e.g. `http://localhost:8000/*`); opening the file directly sends no referrer.

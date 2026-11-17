@@ -291,9 +291,11 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
 <dialog id="settings">
   <form method="dialog">
     <h2>Settings</h2>
-    <p>The key is stored only in this browser.</p>
+    <p>Stored only in this browser. On the website you can leave the key empty to use the site's key.</p>
     <label class="label" for="keyInput">Gemini API key</label>
-    <input id="keyInput" type="password" autocomplete="off">
+    <input id="keyInput" type="password" autocomplete="off" placeholder="Optional on the website">
+    <label class="label" for="pwInput">Site password</label>
+    <input id="pwInput" type="password" autocomplete="off" placeholder="Only if the site asks for one">
     <label class="label" for="modelSel">Image model (step 1)</label>
     <select id="modelSel"><option value="">Loading…</option></select>
     <div class="actions"><button class="ghost" value="cancel">Close</button><button class="ghost" id="saveKey" value="default">Save</button></div>
@@ -307,10 +309,19 @@ const store = {
   set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}
 };
 const API = "https://generativelanguage.googleapis.com/v1beta";
-const DEFAULT_KEY = "";   // enter your Gemini API key under Settings (stored only in your browser)
+const DEFAULT_KEY = "";   // empty: the website uses the server key via /api/gemini; or enter a key under Settings
 const DEFAULT_MODEL = "models/gemini-nano-banana-2.1";
 const MODEL_PREF = ["nano-banana-2.1","gemini-3-pro-image","gemini-3.1-flash-image","flash-lite-image","gemini-2.5-flash-image"];
 const getKey = () => store.get("gemini_key") || DEFAULT_KEY;
+/* Every Gemini call goes through gfetch: with a key in this browser it calls Google directly;
+   without one it uses the site's relay (/api/gemini), which adds the server's GEMINI_API_KEY. */
+function gfetch(path,opts={},key=getKey()){
+  const headers={...(opts.headers||{})};
+  if(key){ headers["x-goog-api-key"]=key; return fetch(`${API}/${path}`,{...opts,headers}); }
+  if(location.protocol==="file:") return Promise.reject(new Error("No API key. Add your Gemini key under Settings, or open the app from its website."));
+  const pw=store.get("site_password"); if(pw) headers["x-app-password"]=pw;
+  return fetch(`api/gemini?path=${encodeURIComponent(path)}`,{...opts,headers});
+}
 const getModel = () => store.get("image_model") || DEFAULT_MODEL;
 
 /* ---------- Modes: Furniture and Plants share one pipeline, with their own prompts and defaults ---------- */
@@ -477,13 +488,13 @@ $("#tabVector").onclick=()=>showTab("vector");
 
 /* ---------- Settings ---------- */
 const dlg=$("#settings");
-$("#settingsBtn").onclick=()=>{ $("#keyInput").value=getKey(); loadModels(); dlg.showModal(); };
-$("#saveKey").onclick=()=>{ const k=$("#keyInput").value.trim(); if(k) store.set("gemini_key",k); if($("#modelSel").value) store.set("image_model",$("#modelSel").value); };
+$("#settingsBtn").onclick=()=>{ $("#keyInput").value=getKey(); $("#pwInput").value=store.get("site_password")||""; loadModels(); dlg.showModal(); };
+$("#saveKey").onclick=()=>{ const k=$("#keyInput").value.trim(); store.set("gemini_key",k); store.set("site_password",$("#pwInput").value); if($("#modelSel").value) store.set("image_model",$("#modelSel").value); };
 
 async function loadModels(){
   const sel=$("#modelSel"), key=($("#keyInput").value||getKey()).trim();
   try{
-    const r=await fetch(`${API}/models?pageSize=300`,{headers:{"x-goog-api-key":key}});
+    const r=await gfetch("models?pageSize=300",{},key);
     const j=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(`${r.status} ${j.error?.message||""}`);
     const ms=(j.models||[]).filter(m=>/image/.test(m.name)&&!/imagen/.test(m.name)&&m.supportedGenerationMethods?.includes("generateContent"));
@@ -517,8 +528,8 @@ async function nano(parts){
   const send=async withConfig=>{
     const body={contents:[{parts}],generationConfig:{responseModalities:["IMAGE"]}};
     if(withConfig) body.generationConfig.imageConfig={aspectRatio:"4:3",imageSize:"2K"};
-    const r=await fetch(`${API}/${getModel()}:generateContent`,{method:"POST",
-      headers:{"Content-Type":"application/json","x-goog-api-key":getKey()},body:JSON.stringify(body)});
+    const r=await gfetch(`${getModel()}:generateContent`,{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     return {r,j:await r.json().catch(()=>({}))};
   };
   let {r,j}=await send(true);
@@ -1197,7 +1208,7 @@ const fmtIn=x=>{const v=Math.round(x*2)/2,wh=Math.floor(v),hf=v-wh>0?"½":"";ret
 async function textModel(){
   const saved=store.get("text_model"); if(saved) return saved;
   try{
-    const r=await fetch(`${API}/models?pageSize=300`,{headers:{"x-goog-api-key":getKey()}});
+    const r=await gfetch("models?pageSize=300");
     const j=await r.json();
     const ms=(j.models||[]).map(m=>m.name).filter(n=>/gemini/.test(n)&&!/image|tts|live|audio|embed|banana|lite|robotics|computer/.test(n));
     const ver=n=>parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0);
@@ -1215,8 +1226,8 @@ async function estimateSize(){
   const st=state, prompt=M().sizePrompt, fac=M().estFactor;
   const body={contents:[{parts:[{text:prompt},await imgPart(await downscale(state.file))]}],
     generationConfig:{responseMimeType:"application/json",temperature:0.2}};
-  const r=await fetch(`${API}/${model}:generateContent`,{method:"POST",
-    headers:{"Content-Type":"application/json","x-goog-api-key":getKey()},body:JSON.stringify(body)});
+  const r=await gfetch(`${model}:generateContent`,{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json().catch(()=>({}));
   if(!r.ok){ if(r.status===404) store.set("text_model",""); throw new Error(`${r.status} ${j.error?.message||""}`.trim()); }
   const txt=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
