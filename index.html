@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Elevation — Furniture to Vector</title>
+<title>_poly</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
@@ -200,11 +200,24 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
 .emptystate b{color:var(--fg);font-weight:600;font-size:15px}
 .emptystate span{font-size:13px;line-height:1.45}
 .emptystate svg{width:44px;height:44px;margin-bottom:6px;color:var(--line)}
+
+/* ---- _poly: wordmark, dark empty canvas, slow pulse while generating ---- */
+.brand .logo{font:600 17px/1 var(--mono);letter-spacing:-.01em}
+.canvas{--canvas-dark:#16181b;--pulse:rgba(47,79,111,.09);transition:background-color .6s ease}
+.canvas.dark{background:var(--canvas-dark);--pulse:rgba(143,178,212,.13)}
+.canvas.dark .emptystate{color:#8f949b}
+.canvas.dark .emptystate b{color:#e6e8ea}
+.canvas.dark .emptystate svg{color:#3a3e44}
+.canvas::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:radial-gradient(ellipse at 50% 50%,var(--pulse),transparent 70%);transition:opacity .8s ease}
+.canvas.pulsing::after{animation:canvasPulse 3.6s ease-in-out infinite}
+@keyframes canvasPulse{0%,100%{opacity:0}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.canvas.pulsing::after{animation:none;opacity:.6}}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><b>Elevation</b></div>
+  <div class="brand"><b class="logo">_poly</b></div>
   <nav class="modes" role="tablist" aria-label="Subject">
     <button type="button" role="tab" data-mode="furniture" aria-selected="true">Furniture</button>
     <button type="button" role="tab" data-mode="plants" aria-selected="false">Plants</button>
@@ -502,7 +515,13 @@ function showTab(which){
   const r=which==="raster";
   $("#tabRaster").setAttribute("aria-selected",r); $("#tabVector").setAttribute("aria-selected",!r);
   $("#rasterStage").hidden=!r; $("#vectorStage").hidden=r; $("#traceCtl").hidden=r;
-  updateSizePanel();
+  updateSizePanel(); updateTone();
+}
+/* the canvas is dark until there is a drawing to show on the active tab, then white paper */
+function updateTone(){
+  const r=$("#tabRaster").getAttribute("aria-selected")==="true";
+  const has=r?state.versions.length>0:!!state.svg;
+  $(".canvas").classList.toggle("dark",!has);
 }
 $("#tabRaster").onclick=()=>showTab("raster");
 $("#tabVector").onclick=()=>showTab("vector");
@@ -581,7 +600,7 @@ async function addVersion(blob,note,view){
 }
 function selectVersion(i){
   state.cur=i; const v=curVer();
-  state.raster=v.bmp; state.rasterUrl=v.url;
+  state.raster=v.bmp; state.rasterUrl=v.url; setTimeout(updateTone);
   $("#drawPanel").hidden=false;
   $("#thumbImg").src=v.url; $("#thumbBadge").textContent="v"+v.n;
   $("#thumbImg").hidden=false; $("#thumbBadge").hidden=false; $("#thumbPh").hidden=true; $("#thumb").disabled=false;
@@ -609,7 +628,10 @@ function updateGoLabel(){
 }
 let busy=false;
 function setBusy(on,msg){
-  busy=on; document.querySelectorAll(".modes button").forEach(b=>b.disabled=on&&b.getAttribute("aria-selected")!=="true");
+  busy=on; $(".canvas").classList.toggle("pulsing",on);
+  if(!state.svg) $("#vectorStage").innerHTML=emptyHTML(on?"busy":"vector");
+  if(!state.versions.length) $("#rasterStage").innerHTML=emptyHTML(on?"busy":"raster");
+  document.querySelectorAll(".modes button").forEach(b=>b.disabled=on&&b.getAttribute("aria-selected")!=="true");
   $("#thumbBusy").hidden=!on; if(msg) $("#thumbBusy").textContent=msg;
   $("#chatSend").disabled=on; $("#go").disabled=on||!state.file; $("#fromPhoto").disabled=on||!state.file;
 }
@@ -1219,10 +1241,11 @@ async function ensureFill(){
   raw.sil=silLayer(paths,raw.img.width);
 }
 function setVector(svg){ state.svg=svg; $("#vectorStage").innerHTML=svg; updateExports(); }
-function updateExports(){ $("#copyBtn").disabled=$("#dlBtn").disabled=!state.svg; }
+function updateExports(){ $("#copyBtn").disabled=$("#dlBtn").disabled=!state.svg; updateTone(); }
 function emptyHTML(kind){
   const n=M().noun;
-  const t=kind==="raster"?["No line drawing yet","Step 1 redraws your photo here as a clean orthographic line drawing."]
+  const t=kind==="busy"?["Drawing…",`Nano Banana is redrawing your ${n} photo. This can take up to a minute.`]
+         :kind==="raster"?["No line drawing yet","Step 1 redraws your photo here as a clean orthographic line drawing."]
                           :["No drawing yet",`Drop a photo of a ${n}, choose a view and press Generate drawing. The dimensioned vector drawing appears here.`];
   return `<div class="emptystate"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="3"/><path d="M6 32l10-9 8 7 6-5 12 9"/><circle cx="33" cy="19" r="3"/></svg><b>${t[0]}</b><span>${t[1]}</span></div>`;
 }
