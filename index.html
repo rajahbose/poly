@@ -9,6 +9,7 @@
 <style>
 /* Layout: one-screen studio — compact control column left, drawing sheet right (canvas flexes to fill) */
 :root{
+  --ctl:32px;
   --bg:#f3f3f1; --panel:#ffffff; --line:#d9d9d4; --fg:#1b1c1a; --muted:#6c6e68;
   --accent:#2f4f6f; --accent-fg:#ffffff; --paper:#ffffff; --ink:#111111; --err:#a33a2a; --ok:#3d6b45;
   --ui:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -108,14 +109,14 @@ section.sheet{display:flex;flex-direction:column;min-width:0;min-height:0;backgr
 .tabs button{border:1px solid transparent;background:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:var(--muted)}
 .tabs button[aria-selected=true]{border-color:var(--line);color:var(--fg);background:var(--bg)}
 .tools{display:flex;gap:8px;flex-wrap:wrap}
-.filltoggle{font-size:13px;margin-right:auto;margin-left:6px;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.filltoggle{font-size:13px}
 .canvas{position:relative;flex:1 1 0;min-height:0;background:var(--paper)}
 .stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:18px}
 .stage img,.stage svg{width:100%;height:100%;object-fit:contain;display:block}
 /* keep the drawing clear of the floating size panel */
 .canvas.sp-open #vectorStage{padding-right:268px}
 .canvas.sp-collapsed #vectorStage{padding-top:52px}
-.trace{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:7px 12px;border-top:1px solid var(--line);font-size:13px}
+.trace{border-top:1px solid var(--line);font-size:13px}
 .trace label{display:flex;align-items:center;gap:6px}
 .trace input[type=range]{width:90px}
 .trace output{font:12px var(--mono);color:var(--muted);min-width:2.2em}
@@ -174,6 +175,31 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
   .canvas{flex:none;height:70vh}
   .titleblock{grid-template-columns:1fr 1fr}.titleblock div:nth-child(2){border-right:0}
 }
+
+/* ---- alignment pass: one control height, consistent rows ---- */
+.ghost{height:var(--ctl);padding:0 12px;display:inline-flex;align-items:center;font-size:13px}
+.modes{height:calc(var(--ctl) + 4px);align-items:stretch}
+.modes button{display:flex;align-items:center;padding:0 14px;font-size:13px}
+.tcol .row{height:18px}
+.tcol .row .label{line-height:18px}
+.toolbar{gap:8px;padding:8px 12px;align-items:center}
+.tabs{gap:2px}
+.tabs button{height:var(--ctl);padding:0 12px;font-size:13px}
+.vsep{width:1px;height:20px;background:var(--line);margin:0 4px}
+.filltoggle{height:var(--ctl);margin:0 auto 0 0;padding:0 4px;border:0;background:none}
+.tools{gap:6px}
+.trace{display:flex;flex-direction:column;gap:6px;padding:8px 12px}
+.trow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 22px;min-height:var(--ctl)}
+.trow .toggle{height:24px}
+.slider{display:grid;grid-template-columns:auto 96px 2.4em;align-items:center;gap:8px}
+.slider input[type=range]{width:96px;margin:0}
+.slider output{text-align:left}
+.seg.mini{height:var(--ctl)}
+.seg.mini button{display:flex;align-items:center;padding:0 12px}
+.emptystate{max-width:340px;text-align:center;color:var(--muted);display:flex;flex-direction:column;gap:6px;align-items:center}
+.emptystate b{color:var(--fg);font-weight:600;font-size:15px}
+.emptystate span{font-size:13px;line-height:1.45}
+.emptystate svg{width:44px;height:44px;margin-bottom:6px;color:var(--line)}
 </style>
 </head>
 <body>
@@ -191,7 +217,7 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
   <aside>
     <div class="thumbs">
       <div class="tcol">
-        <p class="label">Photo</p>
+        <div class="row"><p class="label">Photo</p></div>
         <div id="drop" tabindex="0" role="button" aria-label="Choose a furniture photo">
           <p><strong>Drop a photo</strong><br>click or paste</p>
         </div>
@@ -239,15 +265,16 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
         <button type="button" role="tab" id="tabRaster" aria-selected="false">Line drawing</button>
         <button type="button" role="tab" id="tabVector" aria-selected="true">Vector</button>
       </div>
+      <span class="vsep" aria-hidden="true"></span>
       <label class="toggle filltoggle" title="Show or hide the closed outline / fill shape of the overall form"><input type="checkbox" id="silh" checked> Fill shape</label>
       <div class="tools">
         <button class="ghost" id="pngBtn" type="button" disabled>Download PNG</button>
-        <button class="ghost" id="copyBtn" type="button">Copy SVG</button>
-        <button class="ghost" id="dlBtn" type="button">Download SVG</button>
+        <button class="ghost" id="copyBtn" type="button" disabled>Copy SVG</button>
+        <button class="ghost" id="dlBtn" type="button" disabled>Download SVG</button>
       </div>
     </div>
     <div class="canvas">
-      <div class="stage" id="rasterStage" hidden><p class="empty">The line drawing from step 1 appears here.</p></div>
+      <div class="stage" id="rasterStage" hidden></div>
       <div class="stage" id="vectorStage"></div>
       <div class="sizepanel" id="sizePanel" hidden>
         <div class="head">
@@ -267,20 +294,24 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
       </div>
     </div>
     <div class="trace" id="traceCtl">
-      <div class="seg mini" id="modeSeg" role="group" aria-label="Trace mode">
-        <button type="button" data-m="center" aria-pressed="true">Centerline</button>
-        <button type="button" data-m="outline" aria-pressed="false">Outline</button>
+      <div class="trow">
+        <div class="seg mini" id="modeSeg" role="group" aria-label="Trace mode">
+          <button type="button" data-m="center" aria-pressed="true">Centerline</button>
+          <button type="button" data-m="outline" aria-pressed="false">Outline</button>
+        </div>
+        <label class="slider">Threshold <input type="range" id="thr" min="60" max="230" value="160"><output id="thrO">160</output></label>
+        <label class="slider">Speckle filter <input type="range" id="turd" min="0" max="60" value="8"><output id="turdO">8</output></label>
+        <label class="slider" data-mode="center">Simplify <input type="range" id="simp" min="0" max="40" value="15"><output id="simpO">1.5</output></label>
+        <label class="slider" data-mode="outline" hidden>Smoothing <input type="range" id="alpha" min="0" max="13" value="10"><output id="alphaO">1.0</output></label>
       </div>
-      <label>Threshold <input type="range" id="thr" min="60" max="230" value="160"><output id="thrO">160</output></label>
-      <label>Speckle filter <input type="range" id="turd" min="0" max="60" value="8"><output id="turdO">8</output></label>
-      <label data-mode="center">Simplify <input type="range" id="simp" min="0" max="40" value="15"><output id="simpO">1.5</output></label>
-      <label data-mode="center" class="toggle"><input type="checkbox" id="curves" checked> Curves</label>
-      <label data-mode="center" class="toggle"><input type="checkbox" id="weights" checked> Line weights</label>
-      <label class="toggle" title="Dashed rectangle at the overall extents; the dimensions measure this box"><input type="checkbox" id="bbox" checked> Bounding box</label>
-      <label data-mode="outline" hidden>Smoothing <input type="range" id="alpha" min="0" max="13" value="10"><output id="alphaO">1.0</output></label>
+      <div class="trow">
+        <label data-mode="center" class="toggle"><input type="checkbox" id="curves" checked> Curves</label>
+        <label data-mode="center" class="toggle"><input type="checkbox" id="weights" checked> Line weights</label>
+        <label class="toggle" title="Dashed rectangle at the overall extents; the dimensions measure this box"><input type="checkbox" id="bbox" checked> Bounding box</label>
+      </div>
     </div>
     <div class="titleblock">
-      <div><small>Object</small><span id="tbName">Lounge chair (example)</span></div>
+      <div><small>Object</small><span id="tbName">—</span></div>
       <div><small>View</small><span id="tbView">Side</span></div>
       <div><small>Scale</small><span id="tbScale">NTS</span></div>
       <div><small>Date</small><span id="tbDate"></span></div>
@@ -354,11 +385,7 @@ ${o.hidden?"- Show important hidden edges (legs or frame concealed behind other 
 Use what is visible in the photo (proportions, materials, any people or objects for scale) together with typical sizes for this kind of furniture, e.g. dining seat height about 18", desk or dining table height 29-30", lounge chair seat height 15-17", sofa depth 34-40". Round to the nearest half inch.
 Reply with only JSON: {"name": "<2-5 word name of the piece>", "width": number, "depth": number, "height": number, "confidence": "low" | "medium" | "high"}`,
     estFactor:1, unit:1, unitLabel:"in", close:0.006, textMax:2.5,
-    chat:"Refine the drawing… e.g. taper the legs", exampleName:"Lounge chair (example)",
-    example:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="#111" stroke-linecap="round" stroke-linejoin="round">
-<g stroke-width="3"><path d="M90 250 L110 150 L300 150 L310 250"/><path d="M110 150 L80 60 Q76 48 88 46 L104 46 L132 150"/>
-<path d="M105 175 L300 175"/><path d="M300 150 Q318 146 322 132 L322 120"/><path d="M118 120 L322 120"/></g>
-<g stroke-width="1.4"><path d="M112 160 L298 160"/><path d="M96 70 L120 140"/></g><path d="M40 250 L360 250" stroke-width="1"/></svg>`},
+    chat:"Refine the drawing… e.g. taper the legs", noun:"piece of furniture"},
   plants:{
     views:[{key:"side",label:"Elevation",short:"elevation"},{key:"top",label:"Plan",short:"plan"}],
     axes:{side:["w","h"],top:["w","d"]},
@@ -395,13 +422,7 @@ Reply with only JSON: {"name": "<common name, with the botanical name in parenth
 - Everything that is not plant is pure white: the background, including the background visible in the gaps between leaves, stems and branches, and any holes, splits or slits in the leaves.
 - No outlines, no interior lines, no grey, no texture, no ground line.
 - Keep exactly the same framing, position, size and shapes as the input image, so the mask overlays the drawing exactly.`,
-    chat:"Refine the drawing… e.g. make the canopy more open", exampleName:"Multi-stem tree (example)",
-    example:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="#111" stroke-linecap="round" stroke-linejoin="round">
-<g stroke-width="3"><path d="M122 168 Q98 150 114 126 Q102 98 134 88 Q140 60 176 64 Q196 42 224 60 Q258 52 268 84 Q298 94 288 124 Q304 150 280 170 Q262 186 236 176 Q216 192 196 178 Q170 192 150 178 Q126 186 122 168 Z"/>
-<path d="M192 262 L194 196 M206 262 L203 200"/></g>
-<g stroke-width="1.4"><path d="M194 196 Q176 168 150 150 M194 200 Q200 160 196 118 M203 200 Q226 170 252 150 M196 150 Q216 130 230 112"/>
-<path d="M150 120 Q160 108 172 116 M220 92 Q232 82 244 92 M168 150 Q178 140 190 148 M240 140 Q252 132 262 142"/></g>
-<path d="M60 262 L340 262" stroke-width="1"/></svg>`}
+    chat:"Refine the drawing… e.g. make the canopy more open", noun:"plant"}
 };
 const freshState=m=>({mode:m,file:null,photoUrl:"",view:MODES[m].views[0].key,name:m,raster:null,rasterUrl:"",svg:"",
   versions:[],cur:-1,vectorOf:-1,known:{},lastKey:null,est:null,size:null,sizeP:null,raw:null,note:"",
@@ -1197,7 +1218,15 @@ async function ensureFill(){
   if(!paths.length) throw new Error("couldn't match the mask to the drawing; try Redraw or another version.");
   raw.sil=silLayer(paths,raw.img.width);
 }
-function setVector(svg){ state.svg=svg; $("#vectorStage").innerHTML=svg; }
+function setVector(svg){ state.svg=svg; $("#vectorStage").innerHTML=svg; updateExports(); }
+function updateExports(){ $("#copyBtn").disabled=$("#dlBtn").disabled=!state.svg; }
+function emptyHTML(kind){
+  const n=M().noun;
+  const t=kind==="raster"?["No line drawing yet","Step 1 redraws your photo here as a clean orthographic line drawing."]
+                          :["No drawing yet",`Drop a photo of a ${n}, choose a view and press Generate drawing. The dimensioned vector drawing appears here.`];
+  return `<div class="emptystate"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="3"/><path d="M6 32l10-9 8 7 6-5 12 9"/><circle cx="33" cy="19" r="3"/></svg><b>${t[0]}</b><span>${t[1]}</span></div>`;
+}
+function showEmpty(){ state.svg=""; $("#vectorStage").innerHTML=emptyHTML("vector"); updateExports(); }
 
 /* ---------- Size: Gemini estimate ---------- */
 const AXIS_NAME={w:"width",d:"depth",h:"height"};
@@ -1413,15 +1442,15 @@ function applyMode(){
   else{
     $("#thumbImg").hidden=true; $("#thumbBadge").hidden=true; $("#thumbPh").hidden=false; $("#thumb").disabled=true;
     $("#drawPanel").hidden=true; $("#pngBtn").disabled=true;
-    $("#rasterStage").innerHTML='<p class="empty">The line drawing from step 1 appears here.</p>';
+    $("#rasterStage").innerHTML=emptyHTML("raster");
   }
   renderHistory();
   step(1,state.versions.length?"done":"",state.versions.length?`v${curVer().n} ready`:"");
   step(2,state.raw?"done":"",state.raw?`Traced v${state.versions[state.vectorOf]?.n??""}`:"");
   $("#go").disabled=!state.file; $("#fromPhoto").disabled=!state.file;
-  if(state.raw) compose(); else { setVector(cfg.example); $("#tbScale").textContent="NTS"; $("#sizeFit").textContent=""; }
+  if(state.raw) compose(); else { showEmpty(); $("#tbScale").textContent="—"; $("#sizeFit").textContent=""; }
   fillSizeInputs(); $("#sizeNote").textContent=state.note||""; $("#sizeNote").classList.toggle("err",!!state.noteErr);
-  $("#tbName").textContent=state.size?.name||(state.file?state.name.replace(/[-_]+/g," "):cfg.exampleName);
+  $("#tbName").textContent=state.size?.name||(state.file?state.name.replace(/[-_]+/g," "):"—");
   $("#tbView").textContent=state.raw?`${viewInfo(state.raw.view).label} · v${state.versions[state.vectorOf]?.n??""}`:viewInfo(state.view).label;
   updateGoLabel(); updateSizePanel();
 }
