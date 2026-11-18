@@ -445,7 +445,8 @@ let state=freshState(MODES[store.get("mode")]?store.get("mode"):"furniture");
 const M=()=>MODES[state.mode];
 const axesFor=v=>M().axes[v]||M().axes[M().views[0].key];
 const viewInfo=v=>M().views.find(x=>x.key===v)||M().views[0];
-$("#tbDate").textContent = new Date().toISOString().slice(0,10);
+{ const d=new Date(), p=v=>String(v).padStart(2,"0");      // local date (toISOString is UTC and runs a day ahead in the evening)
+  $("#tbDate").textContent=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
 
 /* ---------- Potrace (WASM) ---------- */
 let potraceMod = null;
