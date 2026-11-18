@@ -1185,18 +1185,22 @@ function traceBoundary(lab,id,start,w){
 
 /* remove a long horizontal ground line near the bottom (elevations only) */
 function removeGroundLine(ink,w,h){
+  // Find the bottom-most 5-row band whose ink covers >= 35% of the width. Using a band (not a single row)
+  // tolerates a ground line that is slightly tilted or wobbles by a pixel or two after tracing.
+  const B=2, need=w*0.35, rowCount=new Int32Array(h), col=new Uint8Array(w);
+  for(let y=0;y<h;y++){let c=0; const o=y*w; for(let x=0;x<w;x++) c+=ink[o+x]; rowCount[y]=c;}
   let best=-1;
-  for(let y=h-2;y>h*0.4;y--){
-    let run=0,maxRun=0; for(let x=0;x<w;x++){ if(ink[y*w+x]){run++; if(run>maxRun)maxRun=run} else run=0 }
-    if(maxRun>=w*0.4){best=y;break}
+  for(let y=h-2-B;y>h*0.4;y--){
+    let s=0; for(let k=-B;k<=B;k++) s+=rowCount[y+k]; if(s<need) continue;
+    col.fill(0); let cov=0;
+    for(let k=-B;k<=B;k++){const o=(y+k)*w; for(let x=0;x<w;x++) if(ink[o+x]&&!col[x]){col[x]=1;cov++;}}
+    if(cov>=need){best=y;break}
   }
   if(best<0) return;
-  // band of rows around it that also carry a long run
-  let y0=best,y1=best;
-  const longRow=y=>{let run=0,m=0;for(let x=0;x<w;x++){if(ink[y*w+x]){run++;if(run>m)m=run}else run=0}return m>=w*0.3};
-  while(y0>1&&longRow(y0-1)&&best-y0<h*0.03) y0--;
-  while(y1<h-2&&longRow(y1+1)&&y1-best<h*0.03) y1++;
-  for(let y=y0-1;y<=y1+1;y++) for(let x=0;x<w;x++) ink[y*w+x]=0;
+  // erase only the rows the line actually occupies (each carries a lot of ink); feet lose at most a pixel or two
+  const win=Math.max(6,Math.round(h*0.006)); let y0=best,y1=best;
+  for(let y=Math.max(1,best-win);y<=Math.min(h-2,best+win);y++) if(rowCount[y]>=w*0.05){ if(y<y0)y0=y; if(y>y1)y1=y; }
+  for(let y=Math.max(1,y0-1);y<=Math.min(h-2,y1+1);y++) ink.fill(0,y*w,y*w+w);
 }
 
 /* ---------- Silhouette layer + object extents ---------- */
