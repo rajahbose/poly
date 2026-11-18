@@ -1171,7 +1171,8 @@ function regionSilhouette(src,lines,maskBmp,opt){
   for(const d of lines){ try{ g.stroke(new Path2D(d)); }catch{} }
   let px=g.getImageData(0,0,w,h).data; const wall=new Uint8Array(N);
   for(let p=0;p<N;p++) wall[p]=px[p*4]<140?1:0;
-  if(ground) removeGroundLine(wall,w,h);
+  // keep the ground line as a wall here: the mask decides what is background, and removing it would
+  // open the bottom of anything standing on it (shoes, pots, glides) so their insides leak into the background
   // mask, resampled to the drawing size
   g.fillStyle="#fff"; g.fillRect(0,0,w,h); g.drawImage(maskBmp,0,0,w,h);
   px=g.getImageData(0,0,w,h).data; const plant=new Uint8Array(N);
@@ -1319,7 +1320,7 @@ function silhouetteFor(svg){
 function silLayer(paths,w){
   if(!paths||!paths.length) return "";
   const sw=Math.max(1,w/1000).toFixed(2);
-  return `<g id="silhouette" fill="#2f6fb0" fill-opacity="0.12" fill-rule="evenodd" stroke="#2f6fb0" stroke-width="${sw}" stroke-linejoin="round">${paths.map(d=>`<path d="${d}"/>`).join("")}</g>`;
+  return `<g id="silhouette" fill="#2f6fb0" fill-opacity="0.12" fill-rule="evenodd" stroke="none">${paths.map(d=>`<path d="${d}"/>`).join("")}</g>`;
 }
 async function finishTrace(svg){
   const r=silhouetteFor(svg);
