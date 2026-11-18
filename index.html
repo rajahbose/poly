@@ -237,6 +237,11 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
   .recent{flex-direction:row;overflow-x:auto;overflow-y:hidden;flex:none}
   .recent li{flex:0 0 120px}
 }
+
+/* ---- progress line across the top of the canvas ---- */
+.progress{position:absolute;top:0;left:0;right:0;height:3px;z-index:3;pointer-events:none;transition:opacity .5s ease}
+.progress span{display:block;height:100%;background:var(--accent);transform-origin:0 50%;transform:scaleX(0)}
+.progress.fade{opacity:0}
 </style>
 </head>
 <body>
@@ -311,6 +316,7 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
       </div>
     </div>
     <div class="canvas">
+      <div class="progress" id="progress" hidden role="progressbar" aria-label="Generating" aria-valuemin="0" aria-valuemax="100"><span id="progressFill"></span></div>
       <div class="stage" id="rasterStage" hidden></div>
       <div class="stage" id="vectorStage"></div>
       <div class="sizepanel" id="sizePanel" hidden>
@@ -657,6 +663,21 @@ function updateGoLabel(){
   const v=curVer();
   $("#go").textContent=!v?"Generate drawing":v.view!==state.view?`Generate ${viewInfo(state.view).short} drawing from photo`:`Generate drawing from v${v.n}`;
 }
+/* Progress: each stage owns a slice of the bar. Stages of unknown length (Nano Banana) ease toward
+   the end of their slice and slow down as they go; the bar only completes when the drawing is shown. */
+const Prog={
+  on:false,p:0,from:0,to:0,tau:1,t0:0,raf:0,
+  begin(){ cancelAnimationFrame(this.raf); clearTimeout(this.hideT); this.on=true; this.p=0;
+    const el=$("#progress"); el.hidden=false; el.classList.remove("fade"); this.draw(); },
+  phase(from,to,seconds){ if(!this.on) return; this.from=Math.max(this.p,from); this.to=to; this.tau=Math.max(0.2,seconds/2.5); this.t0=performance.now();
+    cancelAnimationFrame(this.raf); const tick=()=>{ const t=(performance.now()-this.t0)/1000;
+      this.p=this.from+(this.to-this.from)*(1-Math.exp(-t/this.tau)); this.draw(); if(this.on) this.raf=requestAnimationFrame(tick); }; tick(); },
+  done(){ if(!this.on) return; cancelAnimationFrame(this.raf); this.on=false; this.p=1; this.draw(true);
+    this.hideT=setTimeout(()=>{ $("#progress").classList.add("fade"); this.hideT=setTimeout(()=>{ $("#progress").hidden=true; },550); },450); },
+  fail(){ if(!this.on) return; cancelAnimationFrame(this.raf); this.on=false; $("#progress").classList.add("fade"); this.hideT=setTimeout(()=>{ $("#progress").hidden=true; },550); },
+  draw(final){ const s=$("#progressFill"); s.style.transition=final?"transform .35s ease-out":"none"; s.style.transform=`scaleX(${this.p.toFixed(4)})`;
+    $("#progress").setAttribute("aria-valuenow",Math.round(this.p*100)); }
+};
 let busy=false;
 function setBusy(on,msg){
   busy=on; $(".canvas").classList.toggle("pulsing",on);
@@ -691,18 +712,21 @@ $("#chatForm").addEventListener("submit",async e=>{
   const instr=$("#chatIn").value.trim(), base=curVer();
   if(!instr||!base) return;
   step(1,"run",`Editing v${base.n}…`); setBusy(true,`Editing v${base.n}…`);
+  Prog.begin(); Prog.phase(0.03,0.95,20);
   try{
     const blob=await nano([{text:editPrompt(instr,base.view)},await imgPart(base.blob),await imgPart(await downscale(state.file))]);
     $("#chatIn").value="";
     await addVersion(blob,instr,base.view);
+    Prog.done();
     if(state.runId) saveRun(false);
     step(1,"done",`v${curVer().n} ready · edited from v${base.n}`);
-  }catch(err){ step(1,"err",String(err.message||err)); logError(String(err.message||err).slice(0,160)); }
+  }catch(err){ step(1,"err",String(err.message||err)); logError(String(err.message||err).slice(0,160)); Prog.fail(); }
   finally{ setBusy(false); $("#chatIn").focus(); }
 });
 $("#chatIn").addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); $("#chatForm").requestSubmit(); } });
 $("#thumb").onclick=()=>showTab("raster");
-$("#fromPhoto").onclick=async()=>{ try{ await drawFromPhoto(); showTab("raster"); }catch(err){ step(1,"err",String(err.message||err)); } };
+$("#fromPhoto").onclick=async()=>{ Prog.begin(); Prog.phase(0.03,0.95,20);
+  try{ await drawFromPhoto(); showTab("raster"); Prog.done(); }catch(err){ step(1,"err",String(err.message||err)); Prog.fail(); } };
 
 /* ---------- Stage 2: threshold + Potrace ---------- */
 function binarize(bmp,thr){
@@ -774,8 +798,10 @@ const retrace=()=>{ clearTimeout(traceTimer); traceTimer=setTimeout(()=>stage2()
 ["curves","weights"].forEach(id=>$("#"+id).addEventListener("change",retrace));
 $("#silh").addEventListener("change",async()=>{                  // instant: no re-trace
   store.set("fill_shape",$("#silh").checked?"1":"0");
-  if($("#silh").checked) await ensureFill().catch(e=>step(2,"err",String(e.message||e)));
-  compose();
+  const needMask=$("#silh").checked&&M().maskFill&&state.raw&&state.raw.sil===null&&!state.versions[state.raw.ver]?.mask;
+  if(needMask){ Prog.begin(); Prog.phase(0.03,0.9,15); }
+  if($("#silh").checked) await ensureFill().catch(e=>{ step(2,"err",String(e.message||e)); Prog.fail(); });
+  compose(); if(needMask) Prog.done();
   if(state.runId&&$("#silh").checked) saveRun(true);
 });
 $("#silh").checked=store.get("fill_shape")!=="0";
@@ -1269,6 +1295,7 @@ async function ensureFill(){
   if(!v.mask){
     const prev=$("#p2m").textContent;
     step(2,"run","Finding the plant's parts for the fill shape…");
+    Prog.phase(Math.max(Prog.p,0.8),0.96,15);
     const blob=await nano([{text:M().maskPrompt},await imgPart(v.blob)]);
     v.mask=await createImageBitmap(blob); v.maskBlob=blob;
     step(2,"done",prev);
@@ -1476,16 +1503,18 @@ function compose(){
 
 /* ---------- Run ---------- */
 $("#go").onclick=async()=>{
-  const v=curVer();
+  const v=curVer(), fromPhoto=!v || v.view!==state.view;
+  Prog.begin();
   try{
-    if(!v || v.view!==state.view){ await drawFromPhoto(); showTab("raster"); }
+    if(fromPhoto){ Prog.phase(0.02,0.58,20); await drawFromPhoto(); showTab("raster"); }
     setBusy(true,"Tracing…");
-    if(state.sizeP) await state.sizeP;
-    try{ await stage2(); state.vectorOf=state.cur; renderHistory(); showTab("vector"); await saveRun(true); }
-    catch(e){ step(2,"err",String(e.message||e)); }
+    if(state.sizeP){ Prog.phase(fromPhoto?0.58:0.03,fromPhoto?0.64:0.15,3); await state.sizeP; }
+    Prog.phase(fromPhoto?0.64:0.15,fromPhoto?0.8:0.75,1.5);
+    try{ await stage2(); state.vectorOf=state.cur; renderHistory(); showTab("vector"); Prog.done(); await saveRun(true); }
+    catch(e){ step(2,"err",String(e.message||e)); Prog.fail(); }
     const label=viewInfo(curVer().view).label;
     $("#tbName").textContent=state.size?.name||state.name.replace(/[-_]+/g," "); $("#tbView").textContent=label+` · v${curVer().n}`;
-  }catch(e){ step(1,"err",String(e.message||e)); }
+  }catch(e){ step(1,"err",String(e.message||e)); Prog.fail(); }
   finally{ setBusy(false); }
 };
 
@@ -1584,7 +1613,7 @@ async function renderStrip(){
 
 async function openRun(id){
   if(busy||id===state.runId) return;
-  setBusy(true,"Opening…");
+  setBusy(true,"Opening…"); Prog.begin(); Prog.phase(0.05,0.9,1.5);
   try{
     const run=await RunDB.run(id); if(!run) throw new Error("it is no longer stored");
     const st=freshState(run.mode);
@@ -1609,8 +1638,8 @@ async function openRun(id){
     await stage2();
     state.cur=run.cur>=0?run.cur:vi;
     const meta=(await RunDB.metas()).find(m=>m.id===id); state.thumb=meta?.thumb||null;
-    applyMode(); showTab("vector");
-  }catch(e){ step(1,"err",`Couldn't open that drawing: ${String(e.message||e).slice(0,120)}`); }
+    applyMode(); showTab("vector"); Prog.done();
+  }catch(e){ step(1,"err",`Couldn't open that drawing: ${String(e.message||e).slice(0,120)}`); Prog.fail(); }
   finally{ setBusy(false); renderStrip(); }
 }
 renderStrip();
