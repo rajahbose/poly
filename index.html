@@ -1414,7 +1414,10 @@ function compose(){
     SL=24; segs=[[0,3],[3,6],[6,12],[12,24]];
     ticks=[[0,"0"],[3,"3"],[6,"6"],[12,"12"],[24,'24"']]; title="GRAPHIC SCALE (INCHES)";
   }
-  let scaleSvg=`<text x="${n(gx)}" y="${n(gy-T*0.45)}" font-size="${n(T*0.6)}" ${font} letter-spacing="${n(T*0.06)}" fill="${ink}" stroke="none">${title}</text>`;
+  // title above the scale: the recognized object name, in the same style the scale title used
+  const objName=(state.size?.name||(state.file?state.name.replace(/[-_]+/g," "):"")).trim().toUpperCase()
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  let scaleSvg=objName?`<text x="${n(gx)}" y="${n(gy-T*0.45)}" font-size="${n(T*0.6)}" ${font} letter-spacing="${n(T*0.06)}" fill="${ink}" stroke="none">${objName}</text>`:"";
   segs.forEach(([a,b],i)=>{ scaleSvg+=`<rect x="${n(gx+a)}" y="${n(gy)}" width="${n(b-a)}" height="${n(bh)}" fill="${i%2?"#ffffff":ink}"/>`; });
   scaleSvg+=`<rect x="${n(gx)}" y="${n(gy)}" width="${n(SL)}" height="${n(bh)}" fill="none"/>`;
   ticks.forEach(([v,t])=>{ scaleSvg+=`<text x="${n(gx+v)}" y="${n(gy+bh+T*0.85)}" text-anchor="middle" font-size="${n(T*0.6)}" ${font} fill="${ink}" stroke="none">${t}</text>`; });
