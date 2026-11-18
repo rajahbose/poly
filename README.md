@@ -6,6 +6,7 @@ Single-file web app that turns a photo of a piece of furniture or a plant into a
 
 - **Furniture** tab: side, front and plan views; sizes in inches.
 - **Plants** tab: elevation and plan views; sizes in feet; mask-guided fill shape.
+- **Recent** filmstrip: the last 10 runs are kept in this browser (IndexedDB) and can be reopened with all their versions.
 
 ## Use
 

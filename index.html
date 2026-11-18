@@ -39,7 +39,7 @@ button,select,input,textarea{font:inherit;color:inherit}
 .ghost{background:none;border:1px solid var(--line);border-radius:6px;padding:5px 11px;cursor:pointer}
 .ghost:hover{border-color:var(--muted)}
 .ghost:disabled{opacity:.4;cursor:not-allowed}
-main{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;min-height:0;
+main{display:grid;grid-template-columns:300px minmax(0,1fr) 128px;gap:16px;min-height:0;
   padding:14px max(16px,env(safe-area-inset-right)) 14px max(16px,env(safe-area-inset-left))}
 aside{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;overflow:auto;padding:2px}
 .label{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
@@ -213,6 +213,30 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
 .canvas.pulsing::after{animation:canvasPulse 3.6s ease-in-out infinite}
 @keyframes canvasPulse{0%,100%{opacity:0}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.canvas.pulsing::after{animation:none;opacity:.6}}
+
+/* ---- Recent filmstrip (right) ---- */
+.strip{gap:8px;padding:2px}
+.strip .label{margin:0}
+.recent{list-style:none;margin:0;padding:2px;display:flex;flex-direction:column;gap:12px;overflow:auto;flex:1 1 0;min-height:0}
+.recent li{position:relative}
+.run{display:flex;flex-direction:column;gap:4px;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;color:var(--fg)}
+.run .tn{display:block;width:100%;aspect-ratio:4/3;max-width:100%;border:1px solid var(--line);border-radius:7px;background:#fff;object-fit:contain;transition:border-color .15s}
+.run:hover .tn{border-color:var(--muted)}
+.run[aria-current=true] .tn{border:2px solid var(--accent)}
+.run .nm{font-size:12px;font-weight:500;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run .mt{font:10.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.runx{position:absolute;top:5px;right:5px;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  font:12px/1 var(--mono);display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity .15s;padding:0}
+.recent li:hover .runx,.runx:focus-visible{opacity:1}
+.runx:hover{color:var(--err);border-color:var(--err)}
+@media (hover:none){.runx{opacity:1}}
+@media (max-width:1100px){main{grid-template-columns:270px minmax(0,1fr) 108px;gap:12px}}
+@media (max-width:860px){
+  main{grid-template-columns:1fr}
+  .strip{overflow:visible}
+  .recent{flex-direction:row;overflow-x:auto;overflow-y:hidden;flex:none}
+  .recent li{flex:0 0 120px}
+}
 </style>
 </head>
 <body>
@@ -330,6 +354,11 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
       <div><small>Date</small><span id="tbDate"></span></div>
     </div>
   </section>
+  <aside class="strip" aria-label="Recent drawings">
+    <p class="label">Recent</p>
+    <ol id="recent" class="recent"></ol>
+    <p class="hint" id="recentEmpty">Your last 10 drawings appear here.</p>
+  </aside>
 </main>
 
 <dialog id="settings">
@@ -475,6 +504,7 @@ function setFile(f){
   state.file=f; state.name=f.name.replace(/\.[^.]+$/,"").replace(/[^\w-]+/g,"-")||state.mode;
   if(state.photoUrl) URL.revokeObjectURL(state.photoUrl);
   state.photoUrl=URL.createObjectURL(f); showPhoto();
+  state.runId=null; state.thumb=null; renderStrip();
   $("#go").disabled=false; step(1,"",""); step(2,"","");
   state.versions.forEach(v=>URL.revokeObjectURL(v.url));
   state.versions=[]; state.cur=-1; state.vectorOf=-1; state.raster=null;
@@ -665,6 +695,7 @@ $("#chatForm").addEventListener("submit",async e=>{
     const blob=await nano([{text:editPrompt(instr,base.view)},await imgPart(base.blob),await imgPart(await downscale(state.file))]);
     $("#chatIn").value="";
     await addVersion(blob,instr,base.view);
+    if(state.runId) saveRun(false);
     step(1,"done",`v${curVer().n} ready · edited from v${base.n}`);
   }catch(err){ step(1,"err",String(err.message||err)); logError(String(err.message||err).slice(0,160)); }
   finally{ setBusy(false); $("#chatIn").focus(); }
@@ -745,6 +776,7 @@ $("#silh").addEventListener("change",async()=>{                  // instant: no 
   store.set("fill_shape",$("#silh").checked?"1":"0");
   if($("#silh").checked) await ensureFill().catch(e=>step(2,"err",String(e.message||e)));
   compose();
+  if(state.runId&&$("#silh").checked) saveRun(true);
 });
 $("#silh").checked=store.get("fill_shape")!=="0";
 
@@ -1238,7 +1270,7 @@ async function ensureFill(){
     const prev=$("#p2m").textContent;
     step(2,"run","Finding the plant's parts for the fill shape…");
     const blob=await nano([{text:M().maskPrompt},await imgPart(v.blob)]);
-    v.mask=await createImageBitmap(blob);
+    v.mask=await createImageBitmap(blob); v.maskBlob=blob;
     step(2,"done",prev);
   }
   const paths=regionSilhouette(raw.img,raw.lines,v.mask,{ground:raw.ground,smooth:$("#curves").checked});
@@ -1343,6 +1375,7 @@ let sizeFrame;
     if(state.size) state.size.src="user";
     sizeNote(axesFor(state.raw?.view||state.view).includes(k)?"Ratio locked to the bounding box: the other dimension follows.":"Used for the other views.");
     cancelAnimationFrame(sizeFrame); sizeFrame=requestAnimationFrame(()=>{ compose(); updateSizePanel(); });   // live, every keystroke / arrow step
+    scheduleSave();
   });
   el.addEventListener("blur",()=>fillSizeInputs());
 });
@@ -1448,13 +1481,139 @@ $("#go").onclick=async()=>{
     if(!v || v.view!==state.view){ await drawFromPhoto(); showTab("raster"); }
     setBusy(true,"Tracing…");
     if(state.sizeP) await state.sizeP;
-    try{ await stage2(); state.vectorOf=state.cur; renderHistory(); showTab("vector"); }
+    try{ await stage2(); state.vectorOf=state.cur; renderHistory(); showTab("vector"); await saveRun(true); }
     catch(e){ step(2,"err",String(e.message||e)); }
     const label=viewInfo(curVer().view).label;
     $("#tbName").textContent=state.size?.name||state.name.replace(/[-_]+/g," "); $("#tbView").textContent=label+` · v${curVer().n}`;
   }catch(e){ step(1,"err",String(e.message||e)); }
   finally{ setBusy(false); }
 };
+
+/* ---------- Recent runs: IndexedDB, last 10 ----------
+   Two stores: "meta" holds a small thumbnail + label per run (all the filmstrip ever loads);
+   "runs" holds the photo, every Nano Banana version, masks and settings, read only when a run is opened. */
+const MAX_RUNS=10;
+const reqP=r=>new Promise((res,rej)=>{ r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+const RunDB={
+  db:null,
+  open(){
+    if(this.db) return this.db;
+    this.db=new Promise((res,rej)=>{
+      if(!("indexedDB" in window)) return rej(new Error("no IndexedDB"));
+      const r=indexedDB.open("poly",1);
+      r.onupgradeneeded=()=>{ const d=r.result; d.createObjectStore("meta",{keyPath:"id"}); d.createObjectStore("runs",{keyPath:"id"}); };
+      r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+    });
+    return this.db;
+  },
+  async tx(stores,mode,fn){ const db=await this.open();
+    return new Promise((res,rej)=>{ const t=db.transaction(stores,mode); let out; fn(t).then(v=>out=v,rej); t.oncomplete=()=>res(out); t.onerror=t.onabort=()=>rej(t.error); }); },
+  put(meta,run){ return this.tx(["meta","runs"],"readwrite",async t=>{ t.objectStore("meta").put(meta); t.objectStore("runs").put(run); }); },
+  metas(){ return this.tx(["meta"],"readonly",t=>reqP(t.objectStore("meta").getAll())); },
+  run(id){ return this.tx(["runs"],"readonly",t=>reqP(t.objectStore("runs").get(id))); },
+  del(id){ return this.tx(["meta","runs"],"readwrite",async t=>{ t.objectStore("meta").delete(id); t.objectStore("runs").delete(id); }); }
+};
+let persistAsked=false;
+
+async function makeThumb(){
+  const raw=state.raw; if(!raw) return null;
+  // the vector drawing with its fill, cropped to the object (no dimensions or scale)
+  const svgStr=raw.sil?raw.svg.replace(/(<svg\b[^>]*>)/,"$1"+raw.sil):raw.svg;
+  const doc=new DOMParser().parseFromString(svgStr,"image/svg+xml"), root=doc.documentElement;
+  const [x0,y0,x1,y1]=raw.obj, pad=Math.max(x1-x0,y1-y0)*0.06;
+  root.setAttribute("viewBox",`${x0-pad} ${y0-pad} ${x1-x0+2*pad} ${y1-y0+2*pad}`);
+  root.setAttribute("width","320"); root.setAttribute("height","240");
+  const url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(root)],{type:"image/svg+xml"}));
+  try{
+    const img=new Image(); img.src=url; await img.decode();
+    const c=document.createElement("canvas"); c.width=320; c.height=240;
+    const g=c.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,320,240); g.drawImage(img,0,0,320,240);
+    return await new Promise(r=>c.toBlob(r,"image/png"));
+  } finally { URL.revokeObjectURL(url); }
+}
+function traceSettings(){ return {thr:+$("#thr").value,turd:+$("#turd").value,simp:+$("#simp").value,alpha:+$("#alpha").value,
+  mode:traceMode,curves:$("#curves").checked,weights:$("#weights").checked,bbox:$("#bbox").checked}; }
+
+async function saveRun(withThumb){
+  const st=state;
+  if(!st.raw&&!st.runId) return;                        // a run starts at its first vector drawing
+  try{
+    if(!st.runId){ st.runId=Date.now().toString(36)+Math.random().toString(36).slice(2,7); st.created=Date.now(); }
+    if(withThumb||!st.thumb){ const t=await makeThumb(); if(t) st.thumb=t; }
+    const meta={id:st.runId,created:st.created,updated:Date.now(),mode:st.mode,
+      name:st.size?.name||st.name.replace(/[-_]+/g," "),view:viewInfo(st.raw?.view||st.view).label,thumb:st.thumb};
+    const run={id:st.runId,created:st.created,mode:st.mode,name:st.name,photo:st.file,view:st.view,
+      versions:st.versions.map(v=>({n:v.n,blob:v.blob,note:v.note,view:v.view,mask:v.maskBlob||null})),
+      cur:st.cur,vectorOf:st.vectorOf,known:st.known,lastKey:st.lastKey,est:st.est,size:st.size,opts:st.opts,trace:traceSettings()};
+    await RunDB.put(meta,run);
+    // keep only the newest MAX_RUNS
+    const all=(await RunDB.metas()).sort((a,b)=>b.created-a.created);
+    for(const m of all.slice(MAX_RUNS)) await RunDB.del(m.id);
+    if(!persistAsked){ persistAsked=true; try{ navigator.storage?.persist?.(); }catch{} }
+    renderStrip();
+  }catch(e){ console.warn("Recent: couldn't save this run",e); }
+}
+let saveTimer;
+function scheduleSave(){ if(!state.runId) return; clearTimeout(saveTimer); saveTimer=setTimeout(()=>saveRun(false),1200); }
+
+let stripUrls=[];
+async function renderStrip(){
+  const ol=$("#recent"); let metas=[];
+  try{ metas=(await RunDB.metas()).sort((a,b)=>b.created-a.created).slice(0,MAX_RUNS); }
+  catch{ $("#recentEmpty").textContent="Recent drawings aren't available in this browser window."; $("#recentEmpty").hidden=false; ol.innerHTML=""; return; }
+  stripUrls.forEach(u=>URL.revokeObjectURL(u)); stripUrls=[];
+  ol.innerHTML="";
+  const today=new Date().toDateString();
+  for(const m of metas){
+    const li=document.createElement("li"), b=document.createElement("button");
+    b.type="button"; b.className="run"; b.setAttribute("aria-current",m.id===state.runId);
+    const d=new Date(m.created);
+    const when=d.toDateString()===today?d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):d.toLocaleDateString([], {month:"short",day:"numeric"});
+    const img=document.createElement("img"); img.className="tn"; img.alt="";
+    if(m.thumb){ const u=URL.createObjectURL(m.thumb); stripUrls.push(u); img.src=u; }
+    const nm=document.createElement("span"); nm.className="nm"; nm.textContent=m.name||"Untitled";
+    const mt=document.createElement("span"); mt.className="mt"; mt.textContent=`${m.view} · ${when}`; b.dataset.mode=m.mode;
+    b.append(img,nm,mt); b.title=`Open ${m.name||"this drawing"}`;
+    b.onclick=()=>openRun(m.id);
+    const x=document.createElement("button"); x.type="button"; x.className="runx"; x.textContent="×"; x.setAttribute("aria-label",`Remove ${m.name||"drawing"} from Recent`);
+    x.onclick=async e=>{ e.stopPropagation(); await RunDB.del(m.id).catch(()=>{}); if(state.runId===m.id){ state.runId=null; } Object.values(sessions).forEach(s=>{ if(s.runId===m.id) s.runId=null; }); renderStrip(); };
+    li.append(b,x); ol.append(li);
+  }
+  $("#recentEmpty").hidden=metas.length>0;
+}
+
+async function openRun(id){
+  if(busy||id===state.runId) return;
+  setBusy(true,"Opening…");
+  try{
+    const run=await RunDB.run(id); if(!run) throw new Error("it is no longer stored");
+    const st=freshState(run.mode);
+    Object.assign(st,{runId:id,created:run.created,name:run.name,view:run.view,known:run.known||{},lastKey:run.lastKey??null,
+      est:run.est||null,size:run.size||null,opts:{...st.opts,...(run.opts||{})},file:run.photo,photoUrl:URL.createObjectURL(run.photo)});
+    for(const v of run.versions){
+      st.versions.push({n:v.n,blob:v.blob,url:URL.createObjectURL(v.blob),bmp:await createImageBitmap(v.blob),note:v.note,view:v.view,
+        maskBlob:v.mask||null,mask:v.mask?await createImageBitmap(v.mask):null});
+    }
+    // restore the trace settings the run was made with
+    const t=run.trace||{};
+    [["thr","thrO",x=>x],["turd","turdO",x=>x],["simp","simpO",x=>(x/10).toFixed(1)],["alpha","alphaO",x=>(x/10).toFixed(1)]].forEach(([k,o,f])=>{
+      if(t[k]!=null){ $("#"+k).value=t[k]; $("#"+o).textContent=f(+t[k]); } });
+    ["curves","weights","bbox"].forEach(k=>{ if(t[k]!=null) $("#"+k).checked=t[k]; });
+    if(t.mode){ traceMode=t.mode;
+      $("#modeSeg").querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x.dataset.m===traceMode));
+      document.querySelectorAll("#traceCtl [data-mode]").forEach(el=>el.hidden=el.dataset.mode!==traceMode); }
+    // swap it in, then re-trace the version that was vectorized
+    sessions[state.mode]=state; state=st; store.set("mode",st.mode);
+    const vi=run.vectorOf>=0?run.vectorOf:Math.max(0,run.cur);
+    state.cur=vi; state.vectorOf=run.vectorOf; state.raster=st.versions[vi].bmp; state.rasterUrl=st.versions[vi].url;
+    await stage2();
+    state.cur=run.cur>=0?run.cur:vi;
+    const meta=(await RunDB.metas()).find(m=>m.id===id); state.thumb=meta?.thumb||null;
+    applyMode(); showTab("vector");
+  }catch(e){ step(1,"err",`Couldn't open that drawing: ${String(e.message||e).slice(0,120)}`); }
+  finally{ setBusy(false); renderStrip(); }
+}
+renderStrip();
 
 /* ---------- Export ---------- */
 function save(blob,name){ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
@@ -1484,6 +1643,7 @@ function applyMode(){
   $("#tbName").textContent=state.size?.name||(state.file?state.name.replace(/[-_]+/g," "):"—");
   $("#tbView").textContent=state.raw?`${viewInfo(state.raw.view).label} · v${state.versions[state.vectorOf]?.n??""}`:viewInfo(state.view).label;
   updateGoLabel(); updateSizePanel();
+  if(typeof renderStrip==="function") renderStrip();
 }
 function switchMode(m){
   if(busy||m===state.mode||!MODES[m]) return;
