@@ -114,7 +114,7 @@ section.sheet{display:flex;flex-direction:column;min-width:0;min-height:0;backgr
 .stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:18px}
 .stage img,.stage svg{width:100%;height:100%;object-fit:contain;display:block}
 /* keep the drawing clear of the floating size panel */
-.canvas.sp-open #vectorStage{padding-right:268px}
+.canvas.sp-open #vectorStage{padding-right:304px}
 .canvas.sp-collapsed #vectorStage{padding-top:52px}
 .trace{border-top:1px solid var(--line);font-size:13px}
 .trace label{display:flex;align-items:center;gap:6px}
@@ -250,6 +250,32 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
 .tools .ghost{background:var(--panel);border:1.5px solid var(--btn-stroke);box-shadow:0 0 0 1px var(--line),var(--btn-shadow)}
 .tools .ghost:hover:not(:disabled){box-shadow:0 0 0 1px var(--muted),var(--btn-shadow)}
 .tools .ghost:disabled{box-shadow:0 0 0 1px var(--line)}
+
+/* ---- floating panels column (size + layers) ---- */
+.floaters{position:absolute;top:12px;right:12px;bottom:12px;z-index:2;width:276px;max-width:calc(100% - 24px);
+  display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}
+.floaters>*{pointer-events:auto}
+.floaters .sizepanel{position:static;width:100%}
+.floaters .sizepanel.collapsed{width:auto}
+.layerpanel{width:100%;min-height:0;flex:0 1 auto;display:flex;flex-direction:column;gap:8px;padding:10px 12px;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 24px rgba(0,0,0,.12);color:var(--fg)}
+.layerpanel .head{display:flex;align-items:center;gap:8px}
+.layerpanel .head .label{flex:1}
+.layerpanel.collapsed{width:auto;padding:6px 8px 6px 12px}
+.layerpanel.collapsed .body,.layerpanel.collapsed .head .label{display:none}
+.layerpanel:not(.collapsed) .chip{display:none}
+.layerpanel .body{min-height:0;overflow:auto;margin:0 -4px;padding:0 4px}
+.layers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.layers li{display:grid;grid-template-columns:16px 22px minmax(0,1fr) auto 44px;align-items:center;gap:7px;padding:3px 0;font-size:12.5px}
+.layers li.off{opacity:.45}
+.layers input[type=checkbox]{margin:0}
+.layers input[type=color]{width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:5px;background:none;cursor:pointer}
+.layers input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.layers input[type=color]::-webkit-color-swatch{border:0;border-radius:3px}
+.layers .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.layers .ct{font:10.5px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.layers input[type=number]{width:46px;padding:3px 4px;border:1px solid var(--line);border-radius:5px;background:var(--bg);font:12px var(--mono);color:var(--fg)}
+.layers .hd{font:500 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -259,6 +285,7 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
     <button type="button" role="tab" data-mode="furniture" aria-selected="true">Furniture</button>
     <button type="button" role="tab" data-mode="plants" aria-selected="false">Plants</button>
     <button type="button" role="tab" data-mode="people" aria-selected="false">People</button>
+    <button type="button" role="tab" data-mode="site" aria-selected="false">Site Plan</button>
   </nav>
   <button class="ghost" id="settingsBtn" type="button" hidden>Settings</button>
 </header>
@@ -327,6 +354,7 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
       <div class="progress" id="progress" hidden role="progressbar" aria-label="Generating" aria-valuemin="0" aria-valuemax="100"><span id="progressFill"></span></div>
       <div class="stage" id="rasterStage" hidden></div>
       <div class="stage" id="vectorStage"></div>
+      <div class="floaters">
       <div class="sizepanel" id="sizePanel" hidden>
         <div class="head">
           <p class="label" style="margin:0" id="sizeLabel">Overall size · in</p>
@@ -342,6 +370,15 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
           <p class="hint strong" id="sizeFit"></p>
           <p class="hint" id="sizeNote"></p>
         </div>
+      </div>
+      <div class="layerpanel" id="layerPanel" hidden>
+        <div class="head">
+          <p class="label" style="margin:0">Layers</p>
+          <span class="chip" id="layerChip"></span>
+          <button type="button" class="iconbtn" id="layerToggle" aria-expanded="true" aria-label="Collapse layers panel">–</button>
+        </div>
+        <div class="body"><ul class="layers" id="layerList"></ul></div>
+      </div>
       </div>
     </div>
     <div class="trace" id="traceCtl">
@@ -410,6 +447,26 @@ function gfetch(path,opts={},key=getKey()){
   return fetch(`api/gemini?path=${encodeURIComponent(path)}`,{...opts,headers});
 }
 const getModel = () => store.get("image_model") || DEFAULT_MODEL;
+
+/* ---------- Site Plan: colour-map palette (what Nano Banana paints) and layer definitions (what we draw) ---------- */
+const SITE_LAYERS=[      // draw order, bottom to top
+  {key:"landscape",label:"Grass & landscape",paint:"#A0FF60",what:"Grass, lawns and planting beds",type:"area",color:"#8fbf5a",op:.25,lw:.4,eps:2,smooth:true},
+  {key:"water",label:"Water",paint:"#0080FF",what:"Water (pools, ponds, rivers)",type:"area",color:"#3b82c4",op:.35,lw:.6,eps:2,smooth:true},
+  {key:"parking",label:"Parking",paint:"#FF8000",what:"Parking lots and parking spaces",type:"area",color:"#c69a5d",op:.25,lw:.6,eps:1.6,smooth:false},
+  {key:"roads",label:"Roads",paint:"#404040",what:"Roads and driveways (vehicle pavement, including intersections)",type:"area",color:"#5f6670",op:.22,lw:.8,eps:2,smooth:true},
+  {key:"sidewalks",label:"Sidewalks & paths",paint:"#C8C8C8",what:"Sidewalks, footpaths and plazas",type:"area",color:"#a8a29a",op:.22,lw:.5,eps:2,smooth:true},
+  {key:"markings",label:"Crosswalks & markings",paint:"#FFFF00",what:"Crosswalks and painted road markings",type:"area",color:"#d9a400",op:.55,lw:.4,eps:1.4,smooth:false,opt:"markings"},
+  {key:"bike",label:"Bike lanes",paint:"#00FFFF",what:"Bike lanes (painted or separated)",type:"area",color:"#1aa39a",op:.45,lw:.6,eps:1.6,smooth:true},
+  {key:"rail",label:"Rail tracks",paint:"#8000FF",what:"Railway and tram tracks (the track bed)",type:"line",color:"#6a4fb3",lw:1.6},
+  {key:"trees",label:"Trees",paint:"#00A000",what:"Tree canopy (each tree crown)",type:"area",color:"#2f7d3a",op:.35,lw:.8,eps:2,smooth:true},
+  {key:"buildings",label:"Buildings",paint:"#FF0000",what:"Buildings and roofs",type:"area",color:"#b5483b",op:.45,lw:1.2,eps:1.6,smooth:false},
+  {key:"furniture",label:"Hydrants & bus stops",type:"point",labels:["fire hydrant","bus stop"],color:"#455a64",lw:.8},
+  {key:"lights",label:"Street lights & poles",type:"point",labels:["street light","utility pole"],color:"#c2185b",lw:.8},
+  {key:"signals",label:"Signals & stop signs",type:"point",labels:["traffic signal","stop sign"],color:"#e4572e",lw:1}
+];
+const SITE_PALETTE_TEXT=o=>SITE_LAYERS.filter(l=>l.paint&&(!l.opt||o[l.opt])).map(l=>`- ${l.what}: ${l.paint}`).join("\n")
+  +(o.markings?"":"\n- Crosswalks and road markings: paint them as the road or sidewalk they are on")+"\n- Anything else (bare ground, unknown): #FFFFFF";
+const defaultLayerStyle=()=>Object.fromEntries(SITE_LAYERS.map(l=>[l.key,{on:true,color:l.color,lw:l.lw}]));
 
 /* ---------- Modes: Furniture and Plants share one pipeline, with their own prompts and defaults ---------- */
 const AXES={side:["d","h"],front:["w","h"],top:["w","d"]};
@@ -512,7 +569,36 @@ Reply with only JSON: {"name": "<2-6 word description of the pose or activity, e
 - Everything else is pure white: the background, including the gaps between arms and body, between legs, between people, and inside open parts of props (e.g. bicycle wheels, chair frames).
 - No outlines, no interior lines, no grey, no texture, no ground line.
 - Keep exactly the same framing, position, size and shapes as the input image, so the mask overlays the drawing exactly.`,
-    chat:"Refine the drawing… e.g. make the stride longer", noun:"person or group"}
+    chat:"Refine the drawing… e.g. make the stride longer", noun:"person or group"},
+  site:{
+    views:[{key:"top",label:"Plan",short:"plan"}],
+    axes:{top:["w","d"]},
+    opts:[{key:"points",label:"Find signals, lights & street furniture",def:true},{key:"markings",label:"Crosswalks & road markings",def:true}],
+    viewText:{top:"a top-down plan"},
+    prompt:(view,o)=>`Convert this aerial / satellite image into a flat, colour-coded land-use map of exactly the same area, framing and orientation: a top-down plan in which every edge stays in the same position, so the map overlays the photo exactly. Do not crop, zoom, rotate or re-frame.
+Paint every surface with exactly one of these flat colours, and use no other colours:
+${SITE_PALETTE_TEXT(o)}
+Rules:
+- Flat solid fills only: no outlines, no text, no labels, no legend, no shading, no texture, no gradients, no shadows.
+- Buildings: paint each roof as a clean shape with straight edges where the building is rectilinear.
+- Tree crowns over roads, sidewalks or roofs: paint the tree canopy.
+- Cars on roads count as road; cars in parking lots count as parking. Building shadows take the colour of the surface underneath.`,
+    editPrompt:(instr,o)=>`The first image is a flat colour-coded land-use map of the second image, an aerial photo of the same area.
+Edit the map as follows: ${instr}
+Keep everything not mentioned exactly as it is, with the same framing and the same flat colours:
+${SITE_PALETTE_TEXT(o)}
+Flat solid fills only: no outlines, text, labels, legend, shading or gradients.`,
+    subject:["a site","that site"],
+    sizePrompt:`This is an aerial or satellite image (for example from Google Maps). Estimate the real-world size of the whole area shown, in feet:
+- width: from the left edge to the right edge of the image
+- depth: from the top edge to the bottom edge of the image
+If a scale bar is visible, use it. Otherwise use cues: a car is about 15 ft long, road travel lanes are 10-12 ft wide, parking stalls about 9 x 18 ft, sidewalks 5-10 ft, single-family houses 30-60 ft wide. Round to the nearest foot.
+Also describe the place in 2-6 words, without giving a street address (e.g. 'Downtown intersection with rail line').
+Reply with only JSON: {"name": "<2-6 words>", "width": number, "depth": number, "height": 0, "confidence": "low" | "medium" | "high"}`,
+    estFactor:12, unit:12, unitLabel:"ft", close:0.006, textMax:1e9, site:true,
+    chat:"Refine the map… e.g. the lot on the right is parking", noun:"site",
+    drop:"Drop an aerial or satellite image (e.g. a Google Maps screenshot) and press Generate drawing. Each category becomes its own coloured layer.",
+    rasterTab:"Colour map"}
 };
 const freshState=m=>({mode:m,file:null,photoUrl:"",view:MODES[m].views[0].key,name:m,raster:null,rasterUrl:"",svg:"",
   versions:[],cur:-1,vectorOf:-1,known:{},lastKey:null,est:null,size:null,sizeP:null,raw:null,note:"",
@@ -553,6 +639,7 @@ function setFile(f){
   if(state.photoUrl) URL.revokeObjectURL(state.photoUrl);
   state.photoUrl=URL.createObjectURL(f); showPhoto();
   state.runId=null; state.thumb=null; renderStrip();
+  state.points=null; state.pointsP=null; state.aspect=null; state.layerStyle=null;
   $("#go").disabled=false; step(1,"",""); step(2,"","");
   state.versions.forEach(v=>URL.revokeObjectURL(v.url));
   state.versions=[]; state.cur=-1; state.vectorOf=-1; state.raster=null;
@@ -593,8 +680,8 @@ function renderOpts(){
 function showTab(which){
   const r=which==="raster";
   $("#tabRaster").setAttribute("aria-selected",r); $("#tabVector").setAttribute("aria-selected",!r);
-  $("#rasterStage").hidden=!r; $("#vectorStage").hidden=r; $("#traceCtl").hidden=r;
-  updateSizePanel(); updateTone();
+  $("#rasterStage").hidden=!r; $("#vectorStage").hidden=r; $("#traceCtl").hidden=r||!!M().site;
+  updateSizePanel(); updateTone(); renderLayerPanel();
 }
 /* the canvas is dark until there is a drawing to show on the active tab, then white paper */
 function updateTone(){
@@ -643,10 +730,10 @@ async function downscale(f){
 }
 
 /* one Nano Banana call: parts in, image blob out (retries without imageConfig if a model rejects it) */
-async function nano(parts){
+async function nano(parts,opt={}){
   const send=async withConfig=>{
     const body={contents:[{parts}],generationConfig:{responseModalities:["IMAGE"]}};
-    if(withConfig) body.generationConfig.imageConfig={aspectRatio:"4:3",imageSize:"2K"};
+    if(withConfig) body.generationConfig.imageConfig={aspectRatio:opt.aspect||"4:3",imageSize:"2K"};
     const r=await gfetch(`${getModel()}:generateContent`,{method:"POST",
       headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     return {r,j:await r.json().catch(()=>({}))};
@@ -736,7 +823,8 @@ async function drawFromPhoto(){
   setBusy(true,"Drawing from photo…");
   try{
     if(!state.size && !state.sizeP) startEstimate();
-    const blob=await nano([{text:buildPrompt()},await imgPart(await downscale(state.file))]);
+    if(M().site && state.opts.points && !state.points && !state.pointsP) startDetect();
+    const blob=await nano([{text:buildPrompt()},await imgPart(await downscale(state.file))],{aspect:await photoAspect()});
     await addVersion(blob,`From photo · ${viewInfo(state.view).short}`,state.view);
     step(1,"done",`v${curVer().n} ready · ${curVer().bmp.width}×${curVer().bmp.height}px`);
   }finally{ setBusy(false); }
@@ -744,6 +832,7 @@ async function drawFromPhoto(){
 
 /* ---------- Stage 1b: refine current drawing via chat ---------- */
 function editPrompt(instr,view){
+  if(M().editPrompt) return M().editPrompt(instr,state.opts);
   const [subj,ref]=M().subject;
   return `The first image is a technical orthographic line drawing of ${subj}. The second image is the original photo of ${ref}, for reference only.
 Edit the drawing as follows: ${instr}
@@ -756,7 +845,7 @@ $("#chatForm").addEventListener("submit",async e=>{
   step(1,"run",`Editing v${base.n}…`); setBusy(true,`Editing v${base.n}…`);
   Prog.begin(); Prog.phase(0.03,0.95,20);
   try{
-    const blob=await nano([{text:editPrompt(instr,base.view)},await imgPart(base.blob),await imgPart(await downscale(state.file))]);
+    const blob=await nano([{text:editPrompt(instr,base.view)},await imgPart(base.blob),await imgPart(await downscale(state.file))],{aspect:await photoAspect()});
     $("#chatIn").value="";
     await addVersion(blob,instr,base.view);
     Prog.done();
@@ -791,6 +880,7 @@ $("#modeSeg").onclick=e=>{
 async function stage2(){
   if(!state.raster) return;
   step(2,"run","Tracing…");
+  if(M().site) return stage2Site();
   if(traceMode==="center") return stage2Center();
   const potrace=await getPotrace();
   const thr=+$("#thr").value, turd=+$("#turd").value, alpha=+$("#alpha").value/10;
@@ -1353,7 +1443,7 @@ function emptyHTML(kind){
   const n=M().noun;
   const t=kind==="busy"?["Drawing…","Nano Banana is redrawing your photo. This can take up to a minute."]
          :kind==="raster"?["No line drawing yet","Step 1 redraws your photo here as a clean orthographic line drawing."]
-                          :["No drawing yet",`Drop a photo of a ${n}, choose a view and press Generate drawing. The dimensioned vector drawing appears here.`];
+                          :["No drawing yet",M().drop||`Drop a photo of a ${n}, choose a view and press Generate drawing. The dimensioned vector drawing appears here.`];
   return `<div class="emptystate"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="3"/><path d="M6 32l10-9 8 7 6-5 12 9"/><circle cx="33" cy="19" r="3"/></svg><b>${t[0]}</b><span>${t[1]}</span></div>`;
 }
 function showEmpty(){ state.svg=""; $("#vectorStage").innerHTML=emptyHTML("vector"); updateExports(); }
@@ -1361,7 +1451,7 @@ function showEmpty(){ state.svg=""; $("#vectorStage").innerHTML=emptyHTML("vecto
 /* ---------- Size: Gemini estimate ---------- */
 const AXIS_NAME={w:"width",d:"depth",h:"height"};
 const fmtFtIn=x=>{const t=Math.round(x/6)*6,ft=Math.floor(t/12),i=t%12;return `${ft}'-${i}"`;};   // nearest 6", matches the panel's half-foot values
-const fmtLen=x=>state.mode==="plants"?fmtFtIn(x):fmtIn(x);
+const fmtLen=x=>(state.mode==="plants"||state.mode==="site")?fmtFtIn(x):fmtIn(x);
 const fmtIn=x=>{const v=Math.round(x*2)/2,wh=Math.floor(v),hf=v-wh>0?"½":"";return `${wh||(hf?"":0)}${hf}"`;};
 
 async function textModel(){
@@ -1425,8 +1515,9 @@ function updateSizePanel(){
   const show=onVector&&!!(state.raw||state.size||state.sizeP), col=$("#sizePanel").classList.contains("collapsed");
   $("#sizePanel").hidden=!show;
   const wide=$(".canvas").clientWidth>720;                 // narrow canvas: let the panel float over instead
-  $(".canvas").classList.toggle("sp-open",show&&!col&&wide);
-  $(".canvas").classList.toggle("sp-collapsed",show&&col);
+  const lp=$("#layerPanel"), lpOpen=!lp.hidden&&!lp.classList.contains("collapsed");
+  $(".canvas").classList.toggle("sp-open",((show&&!col)||lpOpen)&&wide);
+  $(".canvas").classList.toggle("sp-collapsed",show&&col&&!lpOpen);
   const d=readDims(), parts=[["W",d.w],["D",d.d],["H",d.h]].filter(([,v])=>v).map(([k,v])=>`${k} ${r2(v/M().unit)}`);
   $("#sizeChip").textContent=parts.length?parts.join(" · ")+" "+M().unitLabel:"Size";
   $("#sizeLabel").textContent="Overall size · "+M().unitLabel;
@@ -1465,6 +1556,7 @@ $("#bbox").addEventListener("change",()=>compose());
 /* ---------- Compose: scale to inches, add dimensions + graphic scale ---------- */
 function compose(){
   const raw=state.raw; if(!raw) return;
+  if(raw.site) raw.svg=siteSvg(raw);
   const [hk,vk]=axesFor(raw.view), K=state.known;
   const [bx0,by0,bx1,by1]=raw.obj, pw=Math.max(1,bx1-bx0), ph=Math.max(1,by1-by0);
   const ext={[hk]:pw,[vk]:ph};
@@ -1510,8 +1602,8 @@ function compose(){
   const gx=Math.min(0,ix0), gy=Math.min(0,iy0)-T*1.6-bh-T*(est?1.9:0.85);
   // furniture: fixed 0–24"; plants: a feet scale sized to the plant (2' … 64')
   let segs,ticks,title,SL;
-  if(state.mode==="plants"){
-    const L=[2,4,8,16,32,64].filter(f=>f*12<=Math.max(W,H)*0.5).pop()||2; SL=L*12;
+  if(state.mode==="plants"||state.mode==="site"){
+    const L=[2,4,8,16,32,64,128,256,512,1024].filter(f=>f*12<=Math.max(W,H)*0.5).pop()||2; SL=L*12;
     segs=[[0,SL/8],[SL/8,SL/4],[SL/4,SL/2],[SL/2,SL]];
     ticks=[[0,"0"],[SL/4,String(L/4)],[SL/2,String(L/2)],[SL,L+"'"]]; title="GRAPHIC SCALE (FEET)";
   }else if(state.mode==="people"){
@@ -1563,6 +1655,166 @@ $("#go").onclick=async()=>{
   }catch(e){ step(1,"err",String(e.message||e)); Prog.fail(); }
   finally{ setBusy(false); }
 };
+
+/* ---------- Site Plan engine ---------- */
+const ASPECTS=["1:1","3:2","2:3","4:3","3:4","5:4","4:5","16:9","9:16","21:9"];
+async function photoAspect(){
+  if(!M().site) return "4:3";
+  if(state.aspect) return state.aspect;
+  const b=await createImageBitmap(state.file), r=b.width/b.height;
+  state.aspect=ASPECTS.map(a=>{const [x,y]=a.split(":").map(Number);return [a,Math.abs(Math.log(r)-Math.log(x/y))]}).sort((p,q)=>p[1]-q[1])[0][0];
+  return state.aspect;
+}
+// Gemini finds small infrastructure on the original photo, as points
+async function detectPoints(){
+  const st=state, model=await textModel();
+  const labels=SITE_LAYERS.filter(l=>l.type==="point").flatMap(l=>l.labels);
+  const prompt=`This is an aerial or satellite image. Find small street infrastructure that you can actually see: ${labels.join(", ")}.
+Traffic signals usually appear as mast arms or poles with signal heads at intersections; street lights and utility poles as small poles, often recognisable by their shadows.
+For each item give its center as a point [y, x], normalised to 0-1000 over the full image (0,0 = top left).
+Use exactly these labels: ${labels.map(l=>`"${l}"`).join(", ")}. Only include items you can see; at most 150.
+Reply with only JSON: {"points": [{"label": "...", "point": [y, x]}]}`;
+  const body={contents:[{parts:[{text:prompt},await imgPart(await downscale(st.file))]}],generationConfig:{responseMimeType:"application/json",temperature:0.1}};
+  const r=await gfetch(`${model}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(`${r.status} ${j.error?.message||""}`.trim());
+  const txt=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+  let o; try{ o=JSON.parse(txt) }catch{ o=JSON.parse((txt.match(/\{[\s\S]*\}/)||["{}"])[0]) }
+  const arr=Array.isArray(o)?o:(o.points||[]);
+  st.points=arr.filter(p=>labels.includes(String(p.label).toLowerCase())&&Array.isArray(p.point)&&p.point.length===2)
+    .map(p=>({label:String(p.label).toLowerCase(),y:Math.min(1,Math.max(0,p.point[0]/1000)),x:Math.min(1,Math.max(0,p.point[1]/1000))}));
+  return st.points;
+}
+function startDetect(){ const st=state; st.pointsP=detectPoints().catch(e=>{ console.warn("Site: point detection failed",e); st.points=[]; }); return st.pointsP; }
+
+// closed shapes (with holes) from a binary mask
+function maskToPaths(mask,w,h,{eps=1.6,smooth=false,minArea=60,minHole=60}={}){
+  const N=w*h, st=new Int32Array(N);
+  for(let x=0;x<w;x++){mask[x]=0;mask[(h-1)*w+x]=0} for(let y=0;y<h;y++){mask[y*w]=0;mask[y*w+w-1]=0}
+  const sl=new Int32Array(N), ss=[0], s0=[0];
+  for(let p=0;p<N;p++){ if(!mask[p]||sl[p]) continue;
+    const id=ss.length; let n=0,sp=0; st[sp++]=p; sl[p]=id;
+    while(sp){const q=st[--sp]; n++; for(const o of [-w,w,-1,1]){const s=q+o; if(mask[s]&&!sl[s]){sl[s]=id;st[sp++]=s}}}
+    ss.push(n); s0.push(p); }
+  const N8=[-w-1,-w,-w+1,-1,1,w-1,w,w+1], hl=new Int32Array(N), hs=[0], h0=[0], hE=[0];
+  for(let p=0;p<N;p++){ if(mask[p]||hl[p]) continue;
+    const id=hs.length; let n=0,e=0,sp=0; st[sp++]=p; hl[p]=id;
+    while(sp){const q=st[--sp]; n++; const x=q%w,y=(q/w)|0; if(x===0||y===0||x===w-1||y===h-1){e=1;continue}
+      for(const o of N8){const s=q+o; if(!mask[s]&&!hl[s]){hl[s]=id;st[sp++]=s}}}
+    hs.push(n); h0.push(p); hE.push(e); }
+  const ring=(lab,id,start)=>{ let pts=traceBoundary(lab,id,start,w); if(pts.length<4) return "";
+    pts.push(pts[0]); pts=rdp(pts,eps); if(pts.length<4) return ""; return smooth?bezierPath(pts,true):polyPath(pts,true); };
+  const holesOf=new Map();
+  for(let id=1;id<hs.length;id++){ if(hE[id]||hs[id]<minHole) continue; const own=sl[h0[id]-w]; if(!own) continue;
+    if(!holesOf.has(own)) holesOf.set(own,[]); holesOf.get(own).push(id); }
+  const out=[];
+  for(let id=1;id<ss.length;id++){ if(ss[id]<minArea) continue;
+    let d=ring(sl,id,s0[id]); if(!d) continue;
+    for(const hid of holesOf.get(id)||[]){ const hd=ring(hl,hid,h0[hid]); if(hd) d+=hd; }
+    out.push(d); }
+  return out;
+}
+// remove 1–2px fringes left by anti-aliasing between colours (morphological opening)
+function openMask(m,w,h,r=1.5){
+  const dIn=distanceMap(m,w,h), core=new Uint8Array(w*h);
+  for(let p=0;p<w*h;p++) core[p]=m[p]&&dIn[p]>r?1:0;
+  const inv=new Uint8Array(w*h); for(let p=0;p<w*h;p++) inv[p]=core[p]?0:1;
+  const dOut=distanceMap(inv,w,h);
+  for(let p=0;p<w*h;p++) m[p]=core[p]||(dOut[p]<=r+0.5&&m[p])?1:0;
+  return m;
+}
+const hexRGB=s=>[1,3,5].map(i=>parseInt(s.slice(i,i+2),16));
+
+async function stage2Site(){
+  await new Promise(r=>setTimeout(r,20));
+  if(state.pointsP){ step(2,"run","Finding signals, lights and street furniture…"); await state.pointsP; }
+  step(2,"run","Splitting the colour map into layers…");
+  await new Promise(r=>setTimeout(r,20));
+  const bmp=state.raster, w=bmp.width, h=bmp.height, N=w*h;
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const g=c.getContext("2d",{willReadFrequently:true}); g.fillStyle="#fff"; g.fillRect(0,0,w,h); g.drawImage(bmp,0,0);
+  const px=g.getImageData(0,0,w,h).data;
+  // nearest palette colour per pixel (white = nothing); far-off colours stay unclassified
+  const pal=SITE_LAYERS.filter(l=>l.paint&&(!l.opt||state.opts[l.opt])).map(l=>({key:l.key,rgb:hexRGB(l.paint)}));
+  pal.push({key:null,rgb:[255,255,255]});
+  const lab=new Uint8Array(N), MAXD=95*95;
+  for(let p=0;p<N;p++){ const i=p*4, R=px[i],G=px[i+1],B=px[i+2]; let best=-1,bd=MAXD;
+    for(let k=0;k<pal.length;k++){ const q=pal[k].rgb, d=(R-q[0])**2+(G-q[1])**2+(B-q[2])**2; if(d<bd){bd=d;best=k} }
+    lab[p]=best<0?255:best; }
+  const minA=Math.max(30,Math.round((Math.max(w,h)*0.004)**2));
+  const layers={};
+  for(let k=0;k<pal.length-1;k++){
+    const def=SITE_LAYERS.find(l=>l.key===pal[k].key);
+    let m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k){m[p]=1;any++}
+    if(any<minA){ layers[def.key]=[]; continue; }
+    openMask(m,w,h,1.5); removeSmall(m,w,h,minA);
+    if(def.type==="line"){
+      // tracks: one centerline per track bed
+      const id=new ImageData(w,h); for(let p=0;p<N;p++){ const v=m[p]?0:255, i=p*4; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=255; }
+      const svg=centerlineTrace(id,{thr:128,speckle:4,simplify:2,smooth:true,weights:false}).svg;
+      layers[def.key]=[...svg.matchAll(/<path d="([^"]+)"/g)].map(x=>x[1]);
+    } else layers[def.key]=maskToPaths(m,w,h,{eps:def.eps,smooth:def.smooth,minArea:minA,minHole:minA});
+    await new Promise(r=>setTimeout(r,0));
+  }
+  // points -> symbols
+  for(const def of SITE_LAYERS.filter(l=>l.type==="point"))
+    layers[def.key]=(state.points||[]).filter(p=>def.labels.includes(p.label)).map(p=>({label:p.label,x:p.x*w,y:p.y*h}));
+  if(!state.layerStyle) state.layerStyle=defaultLayerStyle();
+  state.raw={site:true,layers,w,h,view:"top",obj:[0,0,w,h],ink:[0,0,w,h],ver:state.cur,sil:"",lines:[],img:null,ground:false,svg:""};
+  compose(); updateSizePanel(); renderLayerPanel();
+  const n=Object.values(layers).reduce((a,L)=>a+L.length,0), k=Object.values(layers).filter(L=>L.length).length;
+  step(2,"done",`Site plan · ${n} features in ${k} layers`);
+}
+function symbolPath(p,r){
+  const {x,y}=p, f=v=>+v.toFixed(1), circ=(cx,cy,rr)=>`M${f(cx-rr)} ${f(cy)}a${f(rr)} ${f(rr)} 0 1 0 ${f(2*rr)} 0a${f(rr)} ${f(rr)} 0 1 0 ${f(-2*rr)} 0Z`;
+  if(p.label==="stop sign"){ let d=""; for(let i=0;i<8;i++){const a=Math.PI/8+i*Math.PI/4; d+=(i?"L":"M")+f(x+r*Math.cos(a))+" "+f(y+r*Math.sin(a));} return `<path d="${d}Z" fill-opacity=".85"/>`; }
+  if(p.label==="traffic signal") return `<path d="${circ(x,y,r)}" fill-opacity=".9"/><path d="${circ(x,y,r*1.7)}" fill="none"/>`;
+  if(p.label==="bus stop") return `<path d="M${f(x-r)} ${f(y-r*.7)}h${f(2*r)}v${f(1.4*r)}h${f(-2*r)}Z" fill-opacity=".8"/>`;
+  if(p.label==="street light") return `<path d="${circ(x,y,r*.6)}" fill-opacity=".9"/><path d="M${f(x-r*1.6)} ${f(y)}h${f(r*.7)}M${f(x+r*.9)} ${f(y)}h${f(r*.7)}M${f(x)} ${f(y-r*1.6)}v${f(r*.7)}M${f(x)} ${f(y+r*.9)}v${f(r*.7)}" fill="none"/>`;
+  return `<path d="${circ(x,y,r*.7)}" fill-opacity=".85"/>`;   // utility pole, hydrant
+}
+function siteSvg(raw){
+  const S=state.layerStyle||(state.layerStyle=defaultLayerStyle()), base=Math.max(raw.w,raw.h)/1000, r=Math.max(raw.w,raw.h)*0.006;
+  let out=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${raw.w} ${raw.h}">`;
+  for(const def of SITE_LAYERS){
+    const L=raw.layers[def.key]; if(!L||!L.length) continue; const s=S[def.key]||{on:true,color:def.color,lw:def.lw}; if(!s.on) continue;
+    const sw=(s.lw*base).toFixed(2);
+    if(def.type==="area") out+=`<g id="layer-${def.key}" fill="${s.color}" fill-opacity="${def.op}" fill-rule="evenodd" stroke="${s.color}" stroke-width="${sw}" stroke-linejoin="round">${L.map(d=>`<path d="${d}"/>`).join("")}</g>`;
+    else if(def.type==="line") out+=`<g id="layer-${def.key}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${L.map(d=>`<path d="${d}"/>`).join("")}</g>`;
+    else out+=`<g id="layer-${def.key}" fill="${s.color}" stroke="${s.color}" stroke-width="${sw}">${L.map(p=>symbolPath(p,r)).join("")}</g>`;
+  }
+  return out+"</svg>";
+}
+/* floating Layers panel: visibility, colour and line weight per layer, live */
+let layerFrame;
+function renderLayerPanel(){
+  const lp=$("#layerPanel"), onVector=$("#tabVector").getAttribute("aria-selected")==="true";
+  const raw=state.raw, show=!!(M().site&&raw&&raw.site&&onVector);
+  lp.hidden=!show; if(!show){ updateSizePanelSafe(); return; }
+  const S=state.layerStyle||(state.layerStyle=defaultLayerStyle());
+  const present=SITE_LAYERS.filter(l=>raw.layers[l.key]&&raw.layers[l.key].length).slice().reverse();   // top of the stack first
+  const ul=$("#layerList"); ul.innerHTML='<li class="hd"><span></span><span></span><span>Layer</span><span>#</span><span>Weight</span></li>';
+  for(const def of present){
+    const s=S[def.key], li=document.createElement("li"); li.className=s.on?"":"off";
+    li.innerHTML=`<input type="checkbox" aria-label="Show ${def.label}"><input type="color" aria-label="${def.label} colour"><span class="nm"></span><span class="ct"></span><input type="number" min="0" max="8" step="0.25" aria-label="${def.label} line weight">`;
+    const [cb,col,nm,ct,lw]=li.children;
+    cb.checked=s.on; col.value=s.color; nm.textContent=def.label; nm.title=def.label; ct.textContent=raw.layers[def.key].length; lw.value=s.lw;
+    const apply=()=>{ cancelAnimationFrame(layerFrame); layerFrame=requestAnimationFrame(()=>{ compose(); scheduleSave(true); }); };
+    cb.onchange=()=>{ s.on=cb.checked; li.className=s.on?"":"off"; apply(); updateLayerChip(); };
+    col.oninput=()=>{ s.color=col.value; apply(); };
+    lw.oninput=()=>{ const v=parseFloat(lw.value); if(v>=0){ s.lw=Math.min(8,v); apply(); } };
+    ul.append(li);
+  }
+  updateLayerChip(); updateSizePanelSafe();
+}
+function updateLayerChip(){ const raw=state.raw; if(!raw?.layers) return; const S=state.layerStyle;
+  const pres=SITE_LAYERS.filter(l=>raw.layers[l.key]?.length); $("#layerChip").textContent=`${pres.filter(l=>S[l.key].on).length}/${pres.length} layers`; }
+function updateSizePanelSafe(){ try{ updateSizePanel(); }catch{} }
+function setLayerCollapsed(c){ const lp=$("#layerPanel"); lp.classList.toggle("collapsed",c); $("#layerToggle").textContent=c?"+":"–";
+  $("#layerToggle").setAttribute("aria-expanded",!c); $("#layerToggle").setAttribute("aria-label",c?"Expand layers panel":"Collapse layers panel");
+  store.set("layers_collapsed",c?"1":""); updateSizePanelSafe(); }
+$("#layerToggle").onclick=()=>setLayerCollapsed(!$("#layerPanel").classList.contains("collapsed"));
+setLayerCollapsed(store.get("layers_collapsed")==="1");
 
 /* ---------- Recent runs: IndexedDB, last 10 ----------
    Two stores: "meta" holds a small thumbnail + label per run (all the filmstrip ever loads);
@@ -1619,7 +1871,8 @@ async function saveRun(withThumb){
       name:st.size?.name||st.name.replace(/[-_]+/g," "),view:viewInfo(st.raw?.view||st.view).label,thumb:st.thumb};
     const run={id:st.runId,created:st.created,mode:st.mode,name:st.name,photo:st.file,view:st.view,
       versions:st.versions.map(v=>({n:v.n,blob:v.blob,note:v.note,view:v.view,mask:v.maskBlob||null})),
-      cur:st.cur,vectorOf:st.vectorOf,known:st.known,lastKey:st.lastKey,est:st.est,size:st.size,opts:st.opts,trace:traceSettings()};
+      cur:st.cur,vectorOf:st.vectorOf,known:st.known,lastKey:st.lastKey,est:st.est,size:st.size,opts:st.opts,trace:traceSettings(),
+      points:st.points||null,layerStyle:st.layerStyle||null,aspect:st.aspect||null};
     await RunDB.put(meta,run);
     // keep only the newest MAX_RUNS
     const all=(await RunDB.metas()).sort((a,b)=>b.created-a.created);
@@ -1629,7 +1882,7 @@ async function saveRun(withThumb){
   }catch(e){ console.warn("Recent: couldn't save this run",e); }
 }
 let saveTimer;
-function scheduleSave(){ if(!state.runId) return; clearTimeout(saveTimer); saveTimer=setTimeout(()=>saveRun(false),1200); }
+function scheduleSave(withThumb=false){ if(!state.runId) return; clearTimeout(saveTimer); saveTimer=setTimeout(()=>saveRun(withThumb),1200); }
 
 let stripUrls=[];
 async function renderStrip(){
@@ -1664,7 +1917,8 @@ async function openRun(id){
     const run=await RunDB.run(id); if(!run) throw new Error("it is no longer stored");
     const st=freshState(run.mode);
     Object.assign(st,{runId:id,created:run.created,name:run.name,view:run.view,known:run.known||{},lastKey:run.lastKey??null,
-      est:run.est||null,size:run.size||null,opts:{...st.opts,...(run.opts||{})},file:run.photo,photoUrl:URL.createObjectURL(run.photo)});
+      est:run.est||null,size:run.size||null,opts:{...st.opts,...(run.opts||{})},file:run.photo,photoUrl:URL.createObjectURL(run.photo),
+      points:run.points||null,layerStyle:run.layerStyle||null,aspect:run.aspect||null});
     for(const v of run.versions){
       st.versions.push({n:v.n,blob:v.blob,url:URL.createObjectURL(v.blob),bmp:await createImageBitmap(v.blob),note:v.note,view:v.view,
         maskBlob:v.mask||null,mask:v.mask?await createImageBitmap(v.mask):null});
@@ -1703,6 +1957,9 @@ function applyMode(){
   drop.setAttribute("aria-label",`Choose a photo of a ${cfg.noun}`);
   $("#chatIn").placeholder=cfg.chat;
   renderViewSeg(); renderOpts(); showPhoto();
+  $("#tabRaster").textContent=cfg.rasterTab||"Line drawing";
+  document.querySelectorAll(".filltoggle,.toolbar .vsep").forEach(el=>el.hidden=!!cfg.site);
+  $("#traceCtl").hidden=!!cfg.site||$("#tabRaster").getAttribute("aria-selected")==="true";
   if(state.versions.length) selectVersion(state.cur);
   else{
     $("#thumbImg").hidden=true; $("#thumbBadge").hidden=true; $("#thumbPh").hidden=false; $("#thumb").disabled=true;
@@ -1717,7 +1974,7 @@ function applyMode(){
   fillSizeInputs(); $("#sizeNote").textContent=state.note||""; $("#sizeNote").classList.toggle("err",!!state.noteErr);
   $("#tbName").textContent=state.size?.name||(state.file?state.name.replace(/[-_]+/g," "):"—");
   $("#tbView").textContent=state.raw?`${viewInfo(state.raw.view).label} · v${state.versions[state.vectorOf]?.n??""}`:viewInfo(state.view).label;
-  updateGoLabel(); updateSizePanel();
+  updateGoLabel(); updateSizePanel(); renderLayerPanel();
   if(typeof renderStrip==="function") renderStrip();
 }
 function switchMode(m){
