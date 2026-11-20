@@ -1743,11 +1743,15 @@ async function stage2Site(){
     lab[p]=best<0?255:best; }
   const minA=Math.max(30,Math.round((Math.max(w,h)*0.004)**2));
   const layers={};
+  // Layering: overlays (trees, markings, bike lanes, rail) also fill in the ground surface underneath them,
+  // so hiding an overlay never leaves a hole, and roads are not chopped up by the markings on them.
+  cleanLabels(lab,pal.length,w,h);           // fringes from soft edges join the neighbouring colour
+  const under=siteUnderlay(lab,pal,w,h);
   for(let k=0;k<pal.length-1;k++){
     const def=SITE_LAYERS.find(l=>l.key===pal[k].key);
-    let m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k){m[p]=1;any++}
+    let m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k||under[p]===k){m[p]=1;any++}
     if(any<minA){ layers[def.key]=[]; continue; }
-    openMask(m,w,h,1.5); removeSmall(m,w,h,minA);
+    removeSmall(m,w,h,minA);
     if(def.type==="line"){
       // tracks: one centerline per track bed
       const id=new ImageData(w,h); for(let p=0;p<N;p++){ const v=m[p]?0:255, i=p*4; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=255; }
@@ -1764,6 +1768,66 @@ async function stage2Site(){
   compose(); updateSizePanel(); renderLayerPanel();
   const n=Object.values(layers).reduce((a,L)=>a+L.length,0), k=Object.values(layers).filter(L=>L.length).length;
   step(2,"done",`Site plan · ${n} features in ${k} layers`);
+}
+/* Clean the colour map: keep only each colour's solid core (opening), then give the leftover
+   anti-aliased fringe pixels to the nearest core colour, so no 1–2px seams separate neighbours. */
+function cleanLabels(lab,K,w,h){
+  const N=w*h, out=new Uint8Array(N).fill(255);
+  for(let k=0;k<K;k++){ const m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k){m[p]=1;any=1}
+    if(!any) continue; openMask(m,w,h,1.5); for(let p=0;p<N;p++) if(m[p]) out[p]=k; }
+  const q=new Int32Array(N); let qh=0,qt=0;
+  for(let p=0;p<N;p++) if(out[p]!==255) q[qt++]=p;
+  while(qh<qt){ const p=q[qh++], x=p%w;
+    for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue;
+      if(out[s]===255){ out[s]=out[p]; q[qt++]=s; } } }
+  // specks too small to be a real feature (slivers where colours meet) join whatever surrounds them
+  const minA=Math.round((Math.max(w,h)*0.006)**2), comp=new Int32Array(N), st=new Int32Array(N); let id=0;
+  for(let p0=0;p0<N;p0++){ if(comp[p0]) continue; id++; const k=out[p0]; let sp=0; st[sp++]=p0; comp[p0]=id; const pix=[]; const nb=new Map();
+    while(sp){ const p=st[--sp]; pix.push(p); const x=p%w;
+      for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue;
+        if(out[s]===k){ if(!comp[s]){comp[s]=id; st[sp++]=s;} } else nb.set(out[s],(nb.get(out[s])||0)+1); } }
+    if(pix.length<minA&&nb.size){ let best=k,bv=0; nb.forEach((v,g)=>{ if(v>bv){bv=v;best=g;} }); for(const p of pix) out[p]=best; } }
+  lab.set(out);
+}
+/* For every overlay pixel, decide which ground surface lies beneath it.
+   Trees and rail: the nearest ground surface, reached without crossing other ground (geodesic), so a tree
+   straddling a road and a sidewalk splits between them. Markings and bike lanes: per piece, the preferred
+   surface around it (road first), falling back to whatever surrounds it most. Returns pal index or 255. */
+const SITE_OVERLAYS={trees:null,rail:null,markings:["roads","parking","sidewalks","bike"],bike:["roads","sidewalks","landscape"]};
+const SITE_GROUND=["landscape","water","parking","roads","sidewalks","buildings"];
+function siteUnderlay(lab,pal,w,h){
+  const N=w*h, idx=k=>pal.findIndex(q=>q.key===k);
+  const isG=new Uint8Array(256), isO=new Uint8Array(256);
+  SITE_GROUND.forEach(k=>{const i=idx(k); if(i>=0) isG[i]=1;});
+  Object.keys(SITE_OVERLAYS).forEach(k=>{const i=idx(k); if(i>=0) isO[i]=1;});
+  // geodesic nearest ground: multi-source BFS from ground pixels, spreading only through overlay pixels
+  const near=new Uint8Array(N).fill(255), q=new Int32Array(N); let qh=0,qt=0;
+  for(let p=0;p<N;p++) if(isG[lab[p]]) { near[p]=lab[p]; }
+  for(let p=0;p<N;p++){ if(!isO[lab[p]]) continue; const x=p%w;
+    for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue; if(isG[lab[s]]){ q[qt++]=p; near[p]=lab[s]; break; } } }
+  while(qh<qt){ const p=q[qh++], x=p%w;
+    for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue;
+      if(isO[lab[s]]&&near[s]===255){ near[s]=near[p]; q[qt++]=s; } } }
+  const under=new Uint8Array(N).fill(255);
+  for(const [key,pref] of Object.entries(SITE_OVERLAYS)){
+    const k=idx(key); if(k<0) continue;
+    if(!pref){ for(let p=0;p<N;p++) if(lab[p]===k) under[p]=near[p]; continue; }
+    // per connected piece: look at what surrounds it
+    const seen=new Uint8Array(N), st=new Int32Array(N);
+    for(let p0=0;p0<N;p0++){ if(lab[p0]!==k||seen[p0]) continue;
+      const comp=[]; let sp=0; st[sp++]=p0; seen[p0]=1; const ring=new Map();
+      while(sp){ const p=st[--sp]; comp.push(p); const x=p%w;
+        for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue;
+          if(lab[s]===k){ if(!seen[s]){seen[s]=1; st[sp++]=s;} continue; }
+          const g=isG[lab[s]]?lab[s]:(isO[lab[s]]?near[s]:255); if(g!==255) ring.set(g,(ring.get(g)||0)+1); } }
+      let tot=0; ring.forEach(v=>tot+=v);
+      let pick=255;
+      for(const pk of pref){ const i=idx(pk); if(i>=0&&(ring.get(i)||0)>=0.15*tot&&(isG[i]||i===idx("bike"))){ pick=i; break; } }
+      if(pick===255){ let bv=0; ring.forEach((v,g)=>{ if(v>bv){bv=v;pick=g;} }); }
+      for(const p of comp) under[p]=pick;
+    }
+  }
+  return under;
 }
 function symbolPath(p,r){
   const {x,y}=p, f=v=>+v.toFixed(1), circ=(cx,cy,rr)=>`M${f(cx-rr)} ${f(cy)}a${f(rr)} ${f(rr)} 0 1 0 ${f(2*rr)} 0a${f(rr)} ${f(rr)} 0 1 0 ${f(-2*rr)} 0Z`;
