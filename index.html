@@ -458,6 +458,7 @@ const SITE_LAYERS=[      // draw order, bottom to top
   {key:"markings",label:"Crosswalks & markings",paint:"#FFFF00",what:"Crosswalks and painted road markings",type:"area",color:"#d9a400",op:.55,lw:.4,eps:1.4,smooth:false,opt:"markings"},
   {key:"bike",label:"Bike lanes",paint:"#00FFFF",what:"Bike lanes (painted or separated)",type:"area",color:"#1aa39a",op:.45,lw:.6,eps:1.6,smooth:true},
   {key:"rail",label:"Rail tracks",paint:"#8000FF",what:"Railway and tram tracks (the track bed)",type:"line",color:"#6a4fb3",lw:1.6},
+  {key:"lanes",label:"Lane & stall lines",type:"line",derived:true,color:"#4b5563",lw:.35},
   {key:"trees",label:"Trees",paint:"#00A000",what:"Tree canopy (each tree crown)",type:"area",color:"#2f7d3a",op:.35,lw:.8,eps:2,smooth:true},
   {key:"buildings",label:"Buildings",paint:"#FF0000",what:"Buildings and roofs",type:"area",color:"#b5483b",op:.45,lw:1.2,eps:1.6,smooth:false},
   {key:"furniture",label:"Hydrants & bus stops",type:"point",labels:["fire hydrant","bus stop"],color:"#455a64",lw:.8},
@@ -1745,21 +1746,31 @@ async function stage2Site(){
   const layers={};
   // Layering: overlays (trees, markings, bike lanes, rail) also fill in the ground surface underneath them,
   // so hiding an overlay never leaves a hole, and roads are not chopped up by the markings on them.
-  cleanLabels(lab,pal.length,w,h);           // fringes from soft edges join the neighbouring colour
+  const pidx=k=>pal.findIndex(q=>q.key===k);
+  const protect=new Set(["markings","rail"].map(pidx).filter(i=>i>=0));
+  const hosts=new Set(["roads","parking"].map(pidx).filter(i=>i>=0));
+  const laneMask=thinLines(lab,pal.length,w,h,hosts,protect);   // before cleanup erases them
+  cleanLabels(lab,pal.length,w,h,protect);    // fringes from soft edges join the neighbouring colour
   const under=siteUnderlay(lab,pal,w,h);
   for(let k=0;k<pal.length-1;k++){
     const def=SITE_LAYERS.find(l=>l.key===pal[k].key);
     let m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k||under[p]===k){m[p]=1;any++}
-    if(any<minA){ layers[def.key]=[]; continue; }
-    removeSmall(m,w,h,minA);
+    const thinCat=protect.has(k), minK=thinCat?12:minA;
+    if(any<minK){ layers[def.key]=[]; continue; }
+    removeSmall(m,w,h,minK);
     if(def.type==="line"){
       // tracks: one centerline per track bed
       const id=new ImageData(w,h); for(let p=0;p<N;p++){ const v=m[p]?0:255, i=p*4; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=255; }
       const svg=centerlineTrace(id,{thr:128,speckle:4,simplify:2,smooth:true,weights:false}).svg;
       layers[def.key]=[...svg.matchAll(/<path d="([^"]+)"/g)].map(x=>x[1]);
-    } else layers[def.key]=maskToPaths(m,w,h,{eps:def.eps,smooth:def.smooth,minArea:minA,minHole:minA});
+    } else layers[def.key]=maskToPaths(m,w,h,{eps:def.eps,smooth:def.smooth,minArea:minK,minHole:minA});
     await new Promise(r=>setTimeout(r,0));
   }
+  // lane & stall lines: centerlines of the thin painted lines found above
+  { let n=0; for(let p=0;p<N;p++) n+=laneMask[p];
+    if(n>20){ const id=new ImageData(w,h); for(let p=0;p<N;p++){ const v=laneMask[p]?0:255, i=p*4; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=255; }
+      layers.lanes=[...centerlineTrace(id,{thr:128,speckle:3,simplify:1.2,smooth:false,weights:false}).svg.matchAll(/<path d="([^"]+)"/g)].map(x=>x[1]); }
+    else layers.lanes=[]; }
   // points -> symbols
   for(const def of SITE_LAYERS.filter(l=>l.type==="point"))
     layers[def.key]=(state.points||[]).filter(p=>def.labels.includes(p.label)).map(p=>({label:p.label,x:p.x*w,y:p.y*h}));
@@ -1771,23 +1782,54 @@ async function stage2Site(){
 }
 /* Clean the colour map: keep only each colour's solid core (opening), then give the leftover
    anti-aliased fringe pixels to the nearest core colour, so no 1–2px seams separate neighbours. */
-function cleanLabels(lab,K,w,h){
+function cleanLabels(lab,K,w,h,protect){
   const N=w*h, out=new Uint8Array(N).fill(255);
-  for(let k=0;k<K;k++){ const m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k){m[p]=1;any=1}
-    if(!any) continue; openMask(m,w,h,1.5); for(let p=0;p<N;p++) if(m[p]) out[p]=k; }
+  // protected categories (crosswalk stripes, rails) are thin by nature: keep them exactly as painted
+  for(let p=0;p<N;p++) if(protect.has(lab[p])) out[p]=lab[p];
+  for(let k=0;k<K;k++){ if(protect.has(k)) continue; const m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k){m[p]=1;any=1}
+    if(!any) continue; openMask(m,w,h,1.5); for(let p=0;p<N;p++) if(m[p]&&out[p]===255) out[p]=k; }
   const q=new Int32Array(N); let qh=0,qt=0;
   for(let p=0;p<N;p++) if(out[p]!==255) q[qt++]=p;
   while(qh<qt){ const p=q[qh++], x=p%w;
     for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue;
       if(out[s]===255){ out[s]=out[p]; q[qt++]=s; } } }
-  // specks too small to be a real feature (slivers where colours meet) join whatever surrounds them
+  // specks too small to be a real feature join whatever surrounds them (protected categories excepted)
   const minA=Math.round((Math.max(w,h)*0.006)**2), comp=new Int32Array(N), st=new Int32Array(N); let id=0;
   for(let p0=0;p0<N;p0++){ if(comp[p0]) continue; id++; const k=out[p0]; let sp=0; st[sp++]=p0; comp[p0]=id; const pix=[]; const nb=new Map();
     while(sp){ const p=st[--sp]; pix.push(p); const x=p%w;
       for(const o of [-w,w,-1,1]){ const s=p+o; if(s<0||s>=N||(o===-1&&x===0)||(o===1&&x===w-1)) continue;
         if(out[s]===k){ if(!comp[s]){comp[s]=id; st[sp++]=s;} } else nb.set(out[s],(nb.get(out[s])||0)+1); } }
-    if(pix.length<minA&&nb.size){ let best=k,bv=0; nb.forEach((v,g)=>{ if(v>bv){bv=v;best=g;} }); for(const p of pix) out[p]=best; } }
+    if(pix.length<minA&&nb.size&&!protect.has(k)){ let best=k,bv=0; nb.forEach((v,g)=>{ if(v>bv){bv=v;best=g;} }); for(const p of pix) out[p]=best; } }
   lab.set(out);
+}
+/* Thin painted lines (lane lines on roads, stall lines in parking lots) look like seams to the cleanup.
+   Tell them apart: a real line has the same surface on both sides; a seam sits between two surfaces. */
+function thinLines(lab,K,w,h,hosts,skip){
+  // Painted lines are thin strokes of any colour (often too dark or too blended to match the palette at all)
+  // sitting on one host surface. Collect the thin, non-solid pixels of every colour, join them across colours
+  // (a stall line can change class where it crosses another), and keep pieces whose surroundings are one host.
+  const N=w*h, thin=new Uint8Array(N), N8=[-w-1,-w,-w+1,-1,1,w-1,w,w+1];
+  const classes=[...Array(K).keys(),255].filter(k=>!skip.has(k));
+  for(const k of classes){
+    const m=new Uint8Array(N); let any=0; for(let p=0;p<N;p++) if(lab[p]===k){m[p]=1;any=1} if(!any) continue;
+    const core=m.slice(); openMask(core,w,h,1.5);
+    for(let p=0;p<N;p++) if(m[p]&&!core[p]) thin[p]=1;
+  }
+  const lines=new Uint8Array(N), seen=new Uint8Array(N), st=new Int32Array(N);
+  for(let p0=0;p0<N;p0++){ if(!thin[p0]||seen[p0]) continue;
+    const pix=[]; let sp=0; st[sp++]=p0; seen[p0]=1; const ring=new Map(), own=new Map(); let x0=w,x1=0,y0=h,y1=0;
+    while(sp){ const p=st[--sp]; pix.push(p); own.set(lab[p],(own.get(lab[p])||0)+1);
+      const x=p%w,y=(p/w)|0; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+      for(const o of N8){ const s=p+o; if(s<0||s>=N) continue;
+        if(thin[s]){ if(!seen[s]){seen[s]=1; st[sp++]=s;} } else ring.set(lab[s],(ring.get(lab[s])||0)+1); } }
+    if(Math.hypot(x1-x0,y1-y0)<12) continue;                 // too short to be a painted line
+    let tot=0,best=-1,bv=0; ring.forEach((v,g)=>{ tot+=v; if(v>bv){bv=v;best=g;} });
+    if(!tot||bv/tot<0.75||!hosts.has(best)) continue;        // a seam between two surfaces, not a line on one
+    if((own.get(best)||0)>pix.length*0.4) continue;          // mostly the host's own ragged edge
+    for(const p of pix){ if(lab[p]===best) continue; let clean=1;      // drop pixels hugging another surface (tree outlines)
+      for(const o of N8){ const s=p+o; if(s>=0&&s<N&&!thin[s]&&lab[s]!==best){clean=0;break;} } if(clean) lines[p]=1; }
+  }
+  return lines;
 }
 /* For every overlay pixel, decide which ground surface lies beneath it.
    Trees and rail: the nearest ground surface, reached without crossing other ground (geodesic), so a tree
@@ -1859,7 +1901,7 @@ function renderLayerPanel(){
   const present=SITE_LAYERS.filter(l=>raw.layers[l.key]&&raw.layers[l.key].length).slice().reverse();   // top of the stack first
   const ul=$("#layerList"); ul.innerHTML='<li class="hd"><span></span><span></span><span>Layer</span><span>#</span><span>Weight</span></li>';
   for(const def of present){
-    const s=S[def.key], li=document.createElement("li"); li.className=s.on?"":"off";
+    const s=S[def.key]||(S[def.key]={on:true,color:def.color,lw:def.lw}), li=document.createElement("li"); li.className=s.on?"":"off";
     li.innerHTML=`<input type="checkbox" aria-label="Show ${def.label}"><input type="color" aria-label="${def.label} colour"><span class="nm"></span><span class="ct"></span><input type="number" min="0" max="8" step="0.25" aria-label="${def.label} line weight">`;
     const [cb,col,nm,ct,lw]=li.children;
     cb.checked=s.on; col.value=s.color; nm.textContent=def.label; nm.title=def.label; ct.textContent=raw.layers[def.key].length; lw.value=s.lw;
@@ -1872,7 +1914,7 @@ function renderLayerPanel(){
   updateLayerChip(); updateSizePanelSafe();
 }
 function updateLayerChip(){ const raw=state.raw; if(!raw?.layers) return; const S=state.layerStyle;
-  const pres=SITE_LAYERS.filter(l=>raw.layers[l.key]?.length); $("#layerChip").textContent=`${pres.filter(l=>S[l.key].on).length}/${pres.length} layers`; }
+  const pres=SITE_LAYERS.filter(l=>raw.layers[l.key]?.length); $("#layerChip").textContent=`${pres.filter(l=>(S[l.key]||{on:true}).on).length}/${pres.length} layers`; }
 function updateSizePanelSafe(){ try{ updateSizePanel(); }catch{} }
 function setLayerCollapsed(c){ const lp=$("#layerPanel"); lp.classList.toggle("collapsed",c); $("#layerToggle").textContent=c?"+":"–";
   $("#layerToggle").setAttribute("aria-expanded",!c); $("#layerToggle").setAttribute("aria-label",c?"Expand layers panel":"Collapse layers panel");
