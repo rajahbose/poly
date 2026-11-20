@@ -240,7 +240,7 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px}
 }
 
 /* ---- progress line across the top of the canvas ---- */
-.progress{position:absolute;top:0;left:0;right:0;height:3px;z-index:3;pointer-events:none;transition:opacity .5s ease}
+.progress{position:absolute;top:0;left:0;right:0;height:6px;z-index:3;pointer-events:none;transition:opacity .5s ease}
 .progress span{display:block;height:100%;background:var(--accent);transform-origin:0 50%;transform:scaleX(0)}
 .progress.fade{opacity:0}
 
@@ -796,20 +796,20 @@ function updateGoLabel(){
    the end of their slice and slow down as they go; the bar only completes when the drawing is shown. */
 const Prog={
   on:false,p:0,from:0,to:0,tau:1,t0:0,raf:0,
-  begin(){ cancelAnimationFrame(this.raf); clearTimeout(this.hideT); this.on=true; this.p=0;
+  begin(){ cancelAnimationFrame(this.raf); clearTimeout(this.hideT); this.on=true; this.p=0; $(".canvas").classList.add("pulsing");
     const el=$("#progress"); el.hidden=false; el.classList.remove("fade"); this.draw(); },
   phase(from,to,seconds){ if(!this.on) return; this.from=Math.max(this.p,from); this.to=to; this.tau=Math.max(0.2,seconds/2.5); this.t0=performance.now();
     cancelAnimationFrame(this.raf); const tick=()=>{ const t=(performance.now()-this.t0)/1000;
       this.p=this.from+(this.to-this.from)*(1-Math.exp(-t/this.tau)); this.draw(); if(this.on) this.raf=requestAnimationFrame(tick); }; tick(); },
-  done(){ if(!this.on) return; cancelAnimationFrame(this.raf); this.on=false; this.p=1; this.draw(true);
+  done(){ if(!this.on) return; cancelAnimationFrame(this.raf); this.on=false; this.p=1; this.draw(true); $(".canvas").classList.toggle("pulsing",busy);
     this.hideT=setTimeout(()=>{ $("#progress").classList.add("fade"); this.hideT=setTimeout(()=>{ $("#progress").hidden=true; },550); },450); },
-  fail(){ if(!this.on) return; cancelAnimationFrame(this.raf); this.on=false; $("#progress").classList.add("fade"); this.hideT=setTimeout(()=>{ $("#progress").hidden=true; },550); },
+  fail(){ if(!this.on) return; cancelAnimationFrame(this.raf); this.on=false; $(".canvas").classList.toggle("pulsing",busy); $("#progress").classList.add("fade"); this.hideT=setTimeout(()=>{ $("#progress").hidden=true; },550); },
   draw(final){ const s=$("#progressFill"); s.style.transition=final?"transform .35s ease-out":"none"; s.style.transform=`scaleX(${this.p.toFixed(4)})`;
     $("#progress").setAttribute("aria-valuenow",Math.round(this.p*100)); }
 };
 let busy=false;
 function setBusy(on,msg){
-  busy=on; $(".canvas").classList.toggle("pulsing",on);
+  busy=on; $(".canvas").classList.toggle("pulsing",on||Prog.on);
   if(!state.svg) $("#vectorStage").innerHTML=emptyHTML(on?"busy":"vector");
   if(!state.versions.length) $("#rasterStage").innerHTML=emptyHTML(on?"busy":"raster");
   document.querySelectorAll(".modes button").forEach(b=>b.disabled=on&&b.getAttribute("aria-selected")!=="true");
